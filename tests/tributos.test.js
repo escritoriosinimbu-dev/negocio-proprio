@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { aliqEfetiva, anexoSimples, apurar, SEGMENTOS, ANEXOS } from '../src/engine/index.js';
+import { aliqEfetiva, anexoSimples, apurar, irrfProLabore, liquidoProLabore, SEGMENTOS, ANEXOS } from '../src/engine/index.js';
 
 const op = (over = {}) => ({
   seg: SEGMENTOS.hamburgueria, receita: 100000, compras: 30000, cmv: 30000, folha: 20000, proLabore: 3000,
@@ -64,15 +64,33 @@ describe('Simples Nacional: anexo pela atividade e pelo Fator R', () => {
     expect(anexoSimples('servico', 0.2799)).toBe('V');
   });
 
-  it('acima do sublimite cobra ICMS/ISS por fora do DAS', () => {
-    const abaixo = apurar('simples', op({ rbt12: 3.6e6 }), 0);
-    expect(abaixo.det).toHaveLength(1);
-    const acima = apurar('simples', op({ rbt12: 3.7e6 }), 0);
-    const icms = acima.det.find(d => d.nome.startsWith('ICMS'));
+  it('6a faixa sem impedimento: ICMS segue no DAS calculado pela 5a faixa', () => {
+    const r = apurar('simples', op({ rbt12: 3.7e6 }), 0);
+    const f = [3.6e6, 0.143, 87300];
+    const ef5 = (3.7e6 * f[1] - f[2]) / 3.7e6;
+    const icms = r.det.find(d => d.nome.startsWith('ICMS no DAS'));
+    expect(icms.valor).toBeCloseTo(100000 * ef5 * 0.335, 6);
+    expect(r.tribVenda).toBeCloseTo(100000 * aliqEfetiva('I', 3.7e6) + icms.valor, 6);
+  });
+
+  it('impedida pelo sublimite na 6a faixa: ICMS por fora, pelas regras normais', () => {
+    const r = apurar('simples', op({ rbt12: 3.7e6, impedidoSublimite: true }), 0);
+    const icms = r.det.find(d => d.nome.includes('fora do DAS'));
     expect(icms.valor).toBeCloseTo(100000 * 0.032, 6);
-    expect(acima.tribVenda).toBeCloseTo(100000 * aliqEfetiva('I', 3.7e6) + icms.valor, 6);
-    const serv = apurar('simples', op({ seg: SEGMENTOS.software, rbt12: 4e6 }), 0);
-    expect(serv.det.find(d => d.nome.startsWith('ISS')).valor).toBeCloseTo(3000, 6);
+    expect(r.tribVenda).toBeCloseTo(100000 * aliqEfetiva('I', 3.7e6) + icms.valor, 6);
+  });
+
+  it('impedida com RBT12 abaixo de 3,6 mi: tira a parcela do ICMS do DAS e cobra por fora', () => {
+    const r = apurar('simples', op({ rbt12: 3e6, impedidoSublimite: true }), 0);
+    const ef = aliqEfetiva('I', 3e6);
+    expect(r.aliq).toBeCloseTo(ef * (1 - 0.335), 10);
+    expect(r.tribVenda).toBeCloseTo(100000 * ef * (1 - 0.335) + 3200, 6);
+  });
+
+  it('ISS dentro do DAS nunca passa de 5% da receita', () => {
+    const r = apurar('simples', op({ seg: SEGMENTOS.software, rbt12: 4.5e6, fatorR: 0.3, impedidoSublimite: false }), 0);
+    const iss = r.det.find(d => d.nome.startsWith('ISS no DAS'));
+    expect(iss.valor).toBeLessThanOrEqual(100000 * 0.05 + 1e-6);
   });
 
   it('o DAS e receita x aliquota efetiva e nao ha CPP fora da guia', () => {
@@ -120,6 +138,27 @@ describe('Lucro Presumido', () => {
   });
 });
 
+describe('PIS/COFINS', () => {
+  it('confeccao: ICMS destacado sai da base (Tema 69 do STF)', () => {
+    const r = apurar('presumido', op({ seg: SEGMENTOS.confeccao }), 0);
+    expect(r.det.find(d => d.nome.startsWith('PIS')).valor).toBeCloseTo(100000 * 0.82 * 0.0065, 6);
+    expect(r.det.find(d => d.nome.startsWith('COFINS')).valor).toBeCloseTo(100000 * 0.82 * 0.03, 6);
+  });
+
+  it('software fica no cumulativo mesmo no Lucro Real', () => {
+    const r = apurar('real', op({ seg: SEGMENTOS.software }), 0);
+    expect(r.det.find(d => d.nome.startsWith('PIS')).valor).toBeCloseTo(650, 6);
+    expect(r.det.find(d => d.nome.startsWith('COFINS')).valor).toBeCloseTo(3000, 6);
+  });
+
+  it('hamburgueria no Real so credita 30% das compras (insumos de aliquota zero)', () => {
+    const o = op();
+    const r = apurar('real', o, 0);
+    const credito = 0.3 * o.compras + o.aluguel + o.utilidades + o.depreciacao;
+    expect(r.det.find(d => d.nome.startsWith('PIS')).valor).toBeCloseTo(Math.max(0, 0.0165 * (o.receita - credito)), 6);
+  });
+});
+
 describe('Lucro Real', () => {
   it('prejuizo nao paga IRPJ/CSLL e vira saldo a compensar', () => {
     const r = apurar('real', op({ receita: 10000, cmv: 3000, compras: 3000 }), 0);
@@ -161,6 +200,26 @@ describe('Identidades', () => {
         const det = r.det.reduce((t, d) => t + d.valor, 0);
         expect(det).toBeCloseTo(r.totalTributos, 6);
       }
+    }
+  });
+});
+
+describe('pro-labore do socio', () => {
+  it('ate R$ 5 mil nao tem IR na fonte (Lei 15.270/2025)', () => {
+    expect(irrfProLabore(5000)).toBe(0);
+    expect(liquidoProLabore(5000)).toBeCloseTo(4450, 6);
+  });
+
+  it('INSS limitado ao teto e IR pela tabela progressiva', () => {
+    expect(liquidoProLabore(15000)).toBeCloseTo(11107.81, 1);
+  });
+
+  it('o liquido nunca cai quando o bruto sobe', () => {
+    let ant = 0;
+    for (let b = 1621; b <= 40000; b += 50) {
+      const l = liquidoProLabore(b);
+      expect(l).toBeGreaterThanOrEqual(ant - 1e-9);
+      ant = l;
     }
   });
 });

@@ -7,8 +7,10 @@ android {
         applicationId "br.com.escritoriosinimbu.negocioproprio"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        // No CI, o numero da execucao vira o versionCode: cada APK novo instala por cima do anterior.
-        versionCode((System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger())
+        // versionCode = minutos desde 1970: cresce em qualquer maquina (CI ou local), entao um APK
+        // novo sempre instala por cima do anterior. Um numero menor faria o Android recusar a
+        // atualizacao, e o `cap run` desinstala sem perguntar, apagando o jogo salvo.
+        versionCode((System.currentTimeMillis().intdiv(60_000L)) as int)
         versionName new groovy.json.JsonSlurper().parse(file("../../package.json")).version
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   novoJogo, fecharMes, patrimonio, comprar, custoEquip, custoEspaco, contratarEmprestimo, quitarEmprestimo,
-  distribuirLucros, limiteCredito, EVENTOS, resolverEvento, sortearEvento, SEGMENTOS,
+  distribuirLucros, limiteCredito, EVENTOS, resolverEvento, sortearEvento, SEGMENTOS, riquezaDono, irrfDaDistribuicao,
 } from '../src/engine/index.js';
 import { semente, jogar } from './ajuda.js';
 
@@ -78,6 +78,24 @@ describe('distribuicao de lucros', () => {
     const r = distribuirLucros(s, 50000);
     expect(r.irrf).toBe(0);
     expect(s.retirado).toBe(50000);
+  });
+
+  it('com investidor, o dono so recebe a parte dele e a riqueza dele nao muda', () => {
+    const s = comLucro();
+    s.participacao = 0.8;
+    const antes = riquezaDono(s);
+    const r = distribuirLucros(s, 50000);
+    expect(s.retirado).toBeCloseTo(40000, 6);
+    expect(r.investidor).toBeCloseTo(10000, 6);
+    expect(riquezaDono(s)).toBeCloseTo(antes, 6);
+  });
+
+  it('a previa da retencao bate com o que e retido', () => {
+    const s = comLucro();
+    distribuirLucros(s, 50000);
+    const previa = irrfDaDistribuicao(s, 1000);
+    expect(previa).toBeCloseTo(5100, 6);
+    expect(distribuirLucros(s, 1000).irrf).toBeCloseTo(previa, 6);
   });
 
   it('acima de R$ 50 mil no mes retem 10% do total do mes', () => {

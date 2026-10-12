@@ -33,6 +33,7 @@ export const ESTRATEGIAS = {
       s.dec.func[k] = Math.max(k === 'producao' ? 1 : 0, s.dec.func[k] + Math.floor(rnd() * 3) - 1);
     }
     s.dec.producao = Math.round(rnd() * capacidades(s, s.dec.func).capacidade);
+    s.dec.producaoAuto = rnd() < 0.5;
   },
 };
 

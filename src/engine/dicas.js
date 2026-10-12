@@ -13,12 +13,12 @@ export function dicas(s) {
     if (h.faltaProduto > h.demanda * 0.08) {
       out.push(['ruim', seg.estocavel
         ? 'Faltou produto. Produza mais, contrate na fábrica ou compre equipamento.'
-        : `Faltou capacidade na ${seg.setorProd.toLowerCase()}. Contrate ou invista em equipamento.`]);
+        : `Faltou capacidade ${seg.noSetorProd}. Contrate ou invista em equipamento.`]);
     }
-    if (h.faltaAtend > h.demanda * 0.08) out.push(['ruim', `Faltou gente no ${seg.setorCom.toLowerCase()}: havia cliente, mas ninguém para atender. Contrate ${seg.cargoCom}.`]);
+    if (h.faltaAtend > h.demanda * 0.08) out.push(['ruim', `Faltou gente ${seg.noSetorCom}: havia cliente, mas ninguém para atender. Contrate ${seg.umCargoCom}.`]);
     const usado = seg.estocavel ? h.produzido : h.vendidos;
     if (h.capacidade > 0 && usado < h.capacidade * 0.6 && h.faltaAtend < h.demanda * 0.05) {
-      out.push(['aviso', `Capacidade ociosa: a equipe de ${seg.setorProd.toLowerCase()} pode fazer ${num(h.capacidade)} e foram usadas ${num(usado)}. Mais marketing, preço menor ou equipe menor.`]);
+      out.push(['aviso', `Capacidade ociosa: a equipe ${seg.noSetorProd} pode fazer ${num(h.capacidade)} e foram usadas ${num(usado)}. Mais marketing, preço menor ou equipe menor.`]);
     }
     if (seg.estocavel && s.estoque > h.vendidos * 1.5 && s.estoque > 300) out.push(['aviso', `Estoque de ${num(s.estoque)} ${seg.unidades} parado. Estoque é dinheiro empatado e custa armazenagem.`]);
     if (s.regime === 'simples' && h.anexo === 'V') out.push(['aviso', `Fator R em ${pct(h.fatorR)}: abaixo de 28% o serviço cai no Anexo V do Simples. Um pró-labore maior pode levar a empresa ao Anexo III.`]);

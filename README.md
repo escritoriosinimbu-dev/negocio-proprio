@@ -16,16 +16,21 @@ O que o jogo ensina, de propósito:
 
 ## Baixar o APK
 
-Cada push na `main` gera um APK na aba **Actions** do GitHub (execução "APK Android" → *Artifacts*). Para
-uma versão "oficial", crie uma tag:
+Cada push na `main` gera um APK na aba **Actions** do GitHub (execução "APK Android" → *Artifacts*,
+guardado por 7 dias). Para uma versão "oficial", suba a versão e a tag juntas:
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
+npm version patch        # ou minor; atualiza o package.json e cria a tag v0.1.1
+git push --follow-tags
 ```
 
-O APK aparece em **Releases**, pronto para baixar no celular. Na primeira instalação o Android pede para
-permitir "instalar apps desta fonte". Como todos os APKs são assinados com a mesma chave de depuração
-(`android/app/debug.keystore`), uma versão nova instala por cima da anterior sem perder o jogo salvo.
+O APK aparece em **Releases**, pronto para baixar no celular (o repositório é privado: é preciso estar
+logado no GitHub). Na primeira instalação o Android pede para permitir "instalar apps desta fonte". Como
+todos os APKs são assinados com a mesma chave de depuração (`android/app/debug.keystore`) e o
+`versionCode` sempre cresce, uma versão nova instala por cima da anterior sem perder o jogo salvo.
+
+O jogo precisa do Android System WebView 111 ou mais novo (Android 7 com o Chrome atualizado já
+serve). Com uma WebView mais antiga, o app mostra uma página pedindo a atualização.
 
 ## Desenvolvimento
 
@@ -62,3 +67,17 @@ scripts/        balanceamento
 É um jogo, não um sistema fiscal. IRPJ e CSLL são apurados mês a mês, não há substituição tributária nem
 IPI, o ICMS usa uma alíquota única por ramo e os encargos de FGTS, 13º e férias entram como 30% da folha. A
 transição para IBS e CBS da reforma tributária ainda não está no jogo.
+
+O que o jogo trata como na lei, porque é justamente o que um escritório explica para o cliente:
+
+- **Simples Nacional**: tabelas e parcelas a deduzir da LC 123/2006 (LC 155/2016); RBT12 proporcional no
+  início de atividade; Fator R com salários, 13º, férias, FGTS e pró-labore; sublimite de R$ 3,6 mi e
+  limite de R$ 4,8 mi medidos pela receita do ano-calendário, com a tolerância de 20%; ICMS/ISS da 6ª
+  faixa calculados pela 5ª enquanto a empresa não está impedida.
+- **Lucro Presumido e Real**: PIS/COFINS cumulativo e não cumulativo, sem o ICMS na base (Tema 69 do STF);
+  software no cumulativo mesmo no Real; crédito só sobre insumos que pagaram a contribuição; prejuízo
+  fiscal compensável até 30% e só se apurado no Real.
+- **Sócio**: pró-labore com INSS até o teto e IRRF pela tabela de 2026 (isenção até R$ 5 mil); retenção de
+  10% sobre lucros acima de R$ 50 mil no mês, devolvida no ajuste anual de quem fica abaixo de R$ 600 mil.
+- **Pessoal e contabilidade**: salário irredutível (a política salarial só sobe); custeio por absorção na
+  indústria; DFC com caixa inicial e financiamento direto ao fornecedor fora do caixa (CPC 03).

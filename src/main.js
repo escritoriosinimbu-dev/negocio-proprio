@@ -17,6 +17,7 @@ iniciarApp(document.getElementById('app'));
 
 if (Capacitor.isNativePlatform()) {
   App.addListener('backButton', () => {
-    if (!voltar()) App.exitApp();
+    // na tela raiz, manda o app para segundo plano (como o Android 12+ faz) em vez de mata-lo
+    if (!voltar()) App.minimizeApp();
   });
 }

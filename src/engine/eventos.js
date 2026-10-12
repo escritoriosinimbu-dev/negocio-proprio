@@ -1,4 +1,5 @@
-import { SEG, clamp, patrimonio, valorEmpresa } from './empresa.js';
+import { SEG, clamp, soma, patrimonio, valorEmpresa, capacidades, demandaEsperada } from './empresa.js';
+import { custoEquip } from './acoes.js';
 import { brl, brl2, num } from './formato.js';
 
 // Acontecimentos sorteados no fechamento do mes. O estado guarda so { id, dados, titulo,
@@ -11,9 +12,18 @@ export const EVENTOS = {
       const seg = SEG(s);
       const qtd = Math.max(50, Math.round(s.hist.at(-1).vendidos * (0.25 + 0.3 * rnd()) / 10) * 10);
       const preco = Math.round(s.dec.preco * 0.8 * 100) / 100;
+      // O pedido consome oferta (producao/estoque), nao atendimento: so tira cliente normal
+      // quando a oferta nao cobre os dois.
+      const c = capacidades(s, s.dec.func);
+      const oferta = seg.estocavel ? s.estoque + c.capacidade : c.capacidade;
+      const jaPedido = soma(s.pedidos, p => p.qtd);
+      const folga = Math.max(0, oferta - jaPedido - Math.min(Math.round(demandaEsperada(s)), c.cobertura));
+      const aviso = qtd > folga
+        ? ` Capacidade livre prevista: ${num(folga)} ${seg.unidades}; o que passar disso sai dos seus clientes normais, que pagam ${brl2(s.dec.preco)}.`
+        : ` Capacidade livre prevista: ${num(folga)} ${seg.unidades}, o pedido cabe sem tirar ninguém.`;
       return {
         titulo: seg.tipo === 'servico' ? 'Um projeto grande na mesa' : 'Pedido grande',
-        texto: `Um cliente corporativo quer ${num(qtd)} ${seg.unidades} a ${brl2(preco)} cada, 20% abaixo do seu preço, com pagamento em 60 dias. O pedido é atendido antes dos clientes normais.`,
+        texto: `Um cliente corporativo quer ${num(qtd)} ${seg.unidades} a ${brl2(preco)} cada, 20% abaixo do seu preço, com pagamento em 60 dias. O pedido é atendido antes dos clientes normais.${aviso}`,
         dados: { qtd, preco }, opcoes: ['Aceitar o pedido', 'Recusar'],
       };
     },
@@ -30,7 +40,7 @@ export const EVENTOS = {
     montar(s) {
       return {
         titulo: 'Proposta da concorrência',
-        texto: `Seu melhor ${SEG(s).cargoProd} recebeu uma proposta de um concorrente e pediu um aumento de R$ 450 por mês para ficar.`,
+        texto: `${SEG(s).melhorProd} recebeu uma proposta de um concorrente e pediu um aumento de R$ 450 por mês para ficar.`,
         dados: {}, opcoes: ['Dar o aumento (+R$ 450/mês)', 'Deixar sair'],
       };
     },
@@ -43,7 +53,7 @@ export const EVENTOS = {
       s.func.producao--;
       s.dec.func.producao = Math.min(s.dec.func.producao, s.func.producao);
       s.M = clamp(s.M - 4, 0, 100);
-      return 'Ele foi embora. A equipe de produção ficou menor.';
+      return `${SEG(s).pronomeProd} foi embora. A equipe ${SEG(s).noSetorProd} ficou menor.`;
     },
   },
   quebra: {
@@ -85,10 +95,10 @@ export const EVENTOS = {
   investidor: {
     cond: s => !s.investidorUsado && s.mes >= 6 && s.participacao === 1 && patrimonio(s) > 0,
     montar(s) {
-      const valor = Math.max(60000, Math.round(valorEmpresa(s) * 0.22 / 5000) * 5000);
+      const valor = Math.max(20000, Math.round(valorEmpresa(s) * 0.22 / 5000) * 5000);
       return {
         titulo: 'Proposta de investidor',
-        texto: `Um investidor-anjo oferece ${brl(valor)} por 20% da empresa. O dinheiro entra no caixa da empresa, e 20% do valor dela passa a ser dele até o fim do jogo.`,
+        texto: `Um investidor-anjo oferece ${brl(valor)} por 20% da empresa. O dinheiro entra no caixa da empresa, e 20% do valor dela passa a ser dele até o fim do jogo. Pelo critério do jogo, a empresa vale hoje cerca de ${brl(valorEmpresa(s))}; a oferta a avalia em ${brl(4 * valor)} antes do aporte.`,
         dados: { valor }, opcoes: ['Aceitar o investimento', 'Recusar'],
       };
     },
@@ -158,6 +168,8 @@ export const EVENTOS = {
       };
     },
     resolver(s, i) {
+      // o reajuste atinge os concorrentes: o preco de mercado sobe o mesmo valor em reais
+      s.precoRef += s.custoMat * 0.12;
       s.custoMat *= 1.12;
       if (i === 1) {
         s.dec.preco = Math.round(s.dec.preco * 1.06 * 100) / 100;
@@ -219,10 +231,10 @@ export const EVENTOS = {
   credito: {
     cond: s => !s.creditoUsado && s.mes >= 4 && s.equipNivel < 5,
     montar(s) {
-      const custo = Math.round(SEG(s).equipCusto * (1 + 0.6 * s.equipNivel));
+      const custo = custoEquip(s);
       return {
         titulo: 'Linha de crédito para máquinas',
-        texto: `Um banco de fomento oferece financiar o próximo nível de equipamento (${brl(custo)}) a 1,2% ao mês, em 48 parcelas. Produtividade +20%.`,
+        texto: `Um banco de fomento oferece financiar o próximo nível de equipamento (${brl(custo)}) a 1,2% ao mês, em 48 parcelas. Produtividade +${Math.round(SEG(s).ganhoEquip * 100)}%.`,
         dados: { custo }, opcoes: ['Financiar o equipamento', 'Agora não'],
       };
     },
@@ -231,8 +243,8 @@ export const EVENTOS = {
       if (i !== 0) return 'Oferta recusada.';
       s.equipNivel++;
       s.imobilizado += d.custo;
-      s.investidoMes += d.custo;
-      s.captadoMes += d.custo;
+      // financiado direto ao fornecedor: nao passa pelo caixa (CPC 03, item 43)
+      s.financiadoMes = (s.financiadoMes || 0) + d.custo;
       s.emprestimos.push({ nome: 'Finame (equipamento)', saldo: d.custo, taxa: 0.012, amort: d.custo / 48 });
       return 'Equipamento novo instalado, pago em 48 meses.';
     },
