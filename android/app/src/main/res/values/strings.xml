@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Negócio Próprio</string>
+    <string name="title_activity_main">Negócio Próprio</string>
+    <string name="package_name">br.com.escritoriosinimbu.negocioproprio</string>
+    <string name="custom_url_scheme">br.com.escritoriosinimbu.negocioproprio</string>
+</resources>

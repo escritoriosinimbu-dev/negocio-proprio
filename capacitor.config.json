@@ -1,0 +1,11 @@
+{
+  "appId": "br.com.escritoriosinimbu.negocioproprio",
+  "appName": "Negócio Próprio",
+  "webDir": "dist",
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "css",
+      "initialViewportFitValueHint": "cover"
+    }
+  }
+}

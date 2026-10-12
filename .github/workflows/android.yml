@@ -1,0 +1,62 @@
+name: APK Android
+
+# Gera o APK a cada push na main, em todo pull request e quando uma tag v* e criada.
+# O APK fica nos "Artifacts" da execucao; nas tags, vira tambem uma Release para baixar no celular.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Instala dependencias e testa o motor
+        run: |
+          npm ci
+          npm test
+
+      - name: Build web e sincroniza com o projeto Android
+        run: npm run android:sync
+
+      - name: Compila o APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Renomeia o APK
+        run: |
+          VERSAO=$(node -p "require('./package.json').version")
+          mv android/app/build/outputs/apk/debug/app-debug.apk "negocio-proprio-${VERSAO}-${GITHUB_RUN_NUMBER}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: negocio-proprio-apk
+          path: negocio-proprio-*.apk
+          retention-days: 30
+
+      - name: Publica a Release (so em tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: negocio-proprio-*.apk
+          generate_release_notes: true
