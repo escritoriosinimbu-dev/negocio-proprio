@@ -7,6 +7,15 @@
     <meta name="theme-color" content="#0D1511" media="(prefers-color-scheme: dark)">
     <meta name="description" content="Jogo de gestão: abra uma empresa, tome decisões por setor e veja o DRE e o caixa mês a mês.">
     <title>Negócio Próprio</title>
+    <!-- O piso de WebView do Capacitor nao vale para a Huawei WebView (numeracao propria). Esta checagem
+         roda antes do bundle e cobre qualquer provedor: sem :has() ou color-mix() a tela sai quebrada. -->
+    <script>
+      try {
+        if (!CSS.supports('selector(:has(a))') || !CSS.supports('color', 'color-mix(in srgb, red, red)')) location.replace('webview-antiga.html');
+      } catch (e) {
+        location.replace('webview-antiga.html');
+      }
+    </script>
   </head>
   <body>
     <div id="app"></div>

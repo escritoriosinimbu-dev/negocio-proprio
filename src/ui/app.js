@@ -39,7 +39,14 @@ function sinal(v) { return v < 0 ? 'neg' : v > 0 ? 'pos' : ''; }
 function esc(t) { return String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
 function render() {
-  if (!S) { app.innerHTML = telaAbertura(); renderModal(); return; }
+  if (!S) {
+    // a abertura nao tem rodape: sem isso o observer gravaria a altura 0 do rodape removido
+    if (medirRodape) medirRodape.disconnect();
+    document.documentElement.style.removeProperty('--rodape-h');
+    app.innerHTML = telaAbertura();
+    renderModal();
+    return;
+  }
   const seg = SEG(S), am = anoMes(S.mes), h = S.hist.at(-1);
   app.innerHTML = `
     <div class="topo">
@@ -81,7 +88,8 @@ function medidor(nome, v) {
 // saida de funcionario), para mostrar o caixa provavel antes de o jogador decidir.
 function caixaPrevisto() {
   try {
-    return fecharMes(structuredClone(S), () => 0.5).caixa;
+    // o fechamento nunca le mais de 24 meses de historico: nao clona o resto a cada passo do slider
+    return fecharMes(structuredClone({ ...S, hist: S.hist.slice(-24) }), () => 0.5).caixa;
   } catch (e) {
     return null;
   }
@@ -90,7 +98,7 @@ function caixaPrevisto() {
 function textoPrevisao() {
   const seg = SEG(S), c = capacidades(S, S.dec.func), dem = Math.round(demandaEsperada(S));
   const plano = seg.estocavel ? Math.min(S.dec.producaoAuto ? planoProducaoAuto(S) : S.dec.producao, c.capacidade) : 0;
-  const oferta = seg.estocavel ? plano + S.estoque : c.capacidade;
+  const oferta = (seg.estocavel ? plano + S.estoque : c.capacidade) - soma(S.pedidos, p => p.qtd);
   const gargalo = c.cobertura < Math.min(dem, oferta) ? 'atendimento' : oferta < dem ? (seg.estocavel ? 'produção' : 'capacidade') : null;
   const cap = seg.estocavel ? `produção <b>${num(plano)}</b> + estoque <b>${num(S.estoque)}</b>` : `capacidade <b>${num(c.capacidade)}</b>`;
   const cx = jogoEncerrado(S) ? null : caixaPrevisto();
@@ -122,7 +130,7 @@ function abaPainel() {
         <ul class="noticias">
           <li>Em cada aba você toma as decisões de um setor: equipe, preço, marketing, compras, crédito e regime tributário.</li>
           <li>Quando estiver pronto, toque em <b>Fechar o mês</b>. O jogo calcula vendas, custos, tributos e caixa e mostra o resultado.</li>
-          <li>Três meses seguidos com o caixa negativo e a empresa quebra. No fim do ano ${DURACAO / 12}, a nota compara o que você levou (pró-labore líquido, lucros recebidos e sua parte no valor da empresa) com uma régua de ${brl(CAPITAL_REFERENCIA)}: ${REGUA}.</li>
+          <li>Três meses seguidos com o caixa negativo e a empresa quebra. No fim do ano ${DURACAO / 12}, a nota mede o seu ganho: o que você levou (pró-labore líquido, lucros recebidos e sua parte no valor da empresa) menos o capital que colocou. Múltiplo = 1 + ganho ÷ ${brl(CAPITAL_REFERENCIA)}: ${REGUA}.</li>
         </ul>
       </div>
       ${blocoDicas()}
@@ -137,13 +145,16 @@ function abaPainel() {
     <div class="bloco grafico"><header><h3>Receita e caixa</h3>
       <div class="legenda"><span><i class="leg-receita"></i>Receita</span><span><i class="leg-caixa"></i>Caixa</span><span><i class="leg-lucro"></i>Lucro</span></div></header>
       ${grafico()}</div>
-    <div class="kpis">${kpi('Nota se acabasse hoje', notaFinal(S))}${kpi('Múltiplo', multiploNota(S).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '×')}${kpi('Valor da empresa', brlK(valorEmpresa(S)))}${kpi('Meses restantes', S.modoLivre ? '—' : Math.max(0, DURACAO - S.mes))}</div>
+    <div class="kpis">${kpi('Nota se acabasse hoje', notaFinal(S))}${kpi('Múltiplo', fmtMultiplo(multiploNota(S)))}${kpi('Valor da empresa', brlK(valorEmpresa(S)))}${kpi('Meses restantes', S.modoLivre ? '—' : Math.max(0, DURACAO - S.mes))}</div>
     <p class="ajuda">Régua da nota: ${REGUA}.</p>
     ${blocoDicas()}
     <div class="bloco"><h3>Acontecimentos de ${MESES[h.mes % 12].toLowerCase()}</h3>${listaNoticias(h.noticias)}</div>
     ${reiniciar}
   </div>`;
 }
+
+// truncado para baixo: o numero mostrado nunca alcanca um corte de nota que o jogador nao alcancou
+function fmtMultiplo(m) { return (Math.floor(m * 10) / 10).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '×'; }
 
 function kpi(r, v, cls = '') { return `<div class="kpi"><div class="rot">${r}</div><div class="v ${cls}">${v}</div></div>`; }
 
@@ -395,7 +406,7 @@ function abaImpostos() {
         <tr class="sub"><td>Sobre a receita de ${brl(h.receita)}</td><td>${h.receita ? pct(h.tributos / h.receita, 1) : '—'}</td></tr>
       </table></div>
       <div class="kpis">${kpi('RBT12', brlK(h.rbt12))}${kpi('Fator R', pct(h.fatorR))}${kpi('Anexo', h.anexo || '—')}${kpi('Prejuízo fiscal a compensar', brl(S.prejuizoFiscal || 0))}</div>
-      <p class="ajuda">RBT12 é a receita dos 12 meses anteriores e define a faixa (alíquota) do Simples. No 1º mês usa-se a receita do próprio mês × 12; do 2º ao 12º, a média dos meses anteriores × 12. O limite de R$ 4,8 milhões e o sublimite de R$ 3,6 milhões se medem pela receita do ano (janeiro a dezembro), que até agora soma ${brlK(h.rba ?? 0)}.</p>
+      <p class="ajuda">RBT12 é a receita dos 12 meses anteriores e define a faixa (alíquota) do Simples. No 1º mês usa-se a receita do próprio mês × 12; do 2º ao 12º, a média dos meses anteriores × 12. O limite de R$ 4,8 milhões e o sublimite de R$ 3,6 milhões se medem pela receita do ano (janeiro a dezembro), que até agora soma ${brlK(soma(S.hist.filter(x => Math.floor(x.mes / 12) === anoAtual), x => x.receita))}.</p>
       <p class="ajuda">Fator R = salários, 13º, férias, FGTS e pró-labore dos 12 meses anteriores ÷ RBT12. Com 28% ou mais, o serviço vai para o Anexo III; abaixo, para o Anexo V.</p>
       <p class="ajuda">Prejuízo fiscal só nasce em meses apurados no Lucro Real e compensa até 30% do lucro de cada mês seguinte. O prejuízo que o comparativo simula para o Real, com a empresa em outro regime, não é compensável.</p>
     </div>
@@ -479,7 +490,7 @@ function iniDFC(h) {
 function telaAbertura() {
   const seg = SEGMENTOS[setup.segmento];
   const inicial = setup.capital - seg.setup + setup.emprestimo;
-  const fixo = custoFixoInicial(seg), folego = inicial / fixo;
+  const fixo = custoFixoInicial(), folego = inicial / fixo;
   return `<div class="stack abertura">
     <div class="topo"><div><p class="rot">Jogo de gestão</p><h1>Negócio Próprio</h1></div><div class="carimbo">Abertura<b>CNPJ novo</b></div></div>
     <p class="lead">Abra uma empresa, decida preço, equipe, produção, marketing, crédito e regime tributário, e veja o resultado no DRE e no caixa a cada mês. São ${DURACAO} meses para fazer o negócio dar certo, ou quebrar tentando.</p>
@@ -503,10 +514,14 @@ function telaAbertura() {
   </div>`;
 }
 
-function custoFixoInicial(seg) {
-  const f = seg.funcInicial;
-  const folha = f.producao * seg.salProd + f.comercial * seg.salCom + f.adm * seg.salAdm;
-  return folha * 1.3 + seg.aluguel + 3000 + Math.round(seg.mkEscala * 0.5 / 100) * 100 + Math.round(seg.qEscala * 0.4 / 100) * 100 + 700 + 600;
+// Quanto o caixa cai no primeiro mes sem nenhuma venda, pelo proprio motor: entram folha, encargos,
+// CPP fora do Simples, honorarios do regime escolhido e a parcela e os juros do Pronampe.
+function custoFixoInicial() {
+  const s = novoJogo({ ...setup });
+  s.mercadoMult = 0;
+  const antes = s.caixa;
+  fecharMes(s, () => 0.5);
+  return antes - s.caixa;
 }
 
 /* ---- modal ---- */
@@ -544,9 +559,9 @@ function conteudoModal() {
     const tributos = soma(S.hist, x => x.tributos);
     return `<p class="rot">${quebrou ? 'Fim de jogo' : `Fim do ano ${DURACAO / 12}`}</p>
       <h2>${quebrou ? `${esc(S.nome)} fechou as portas` : `${esc(S.nome)} chegou ao fim do ano ${DURACAO / 12}`}</h2>
-      <p>${quebrou ? `O caixa ficou negativo além do que o banco aceitava. A empresa durou ${S.mes} meses.` : `Você colocou ${brl(S.capitalInicial)} no negócio. Somando os lucros recebidos e a sua parte no valor da empresa, saiu com ${brl(rq)}: pró-labore líquido, lucros recebidos e a sua parte no valor da empresa.`}</p>
+      <p>${quebrou ? `O caixa ficou negativo além do que o banco aceitava. A empresa durou ${S.mes} meses.` : `Você colocou ${brl(S.capitalInicial)} no negócio e saiu com ${brl(rq)}, somando pró-labore líquido, lucros recebidos e a sua parte no valor da empresa: ganho de ${brl(rq - S.capitalInicial)}.`}</p>
       <div class="row"><span class="carimbo nota">Nota<b>${notaFinal(S)}</b></span>
-        <div class="small muted">${quebrou ? '' : `${mult.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}× numa régua de ${brl(CAPITAL_REFERENCIA)} (${REGUA})`}</div></div>
+        <div class="small muted">${quebrou ? '' : `${fmtMultiplo(mult)} (1 + ganho ÷ ${brl(CAPITAL_REFERENCIA)}; ${REGUA})`}</div></div>
       <div class="kpis">${kpi('Receita total', brlK(soma(S.hist, x => x.receita)))}${kpi('Lucro acumulado', brlK(S.lucroAcum), sinal(S.lucroAcum))}${kpi('Tributos pagos', brlK(tributos))}${kpi('Empregos', S.func.producao + S.func.comercial + S.func.adm)}</div>
       <div class="stack apertada">
         ${quebrou ? '' : '<button class="btn prim" data-acao="continuar">Continuar jogando</button>'}

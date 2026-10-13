@@ -1,4 +1,7 @@
-import { SEGMENTOS, POLITICA, SETORES, CAPITAL_REFERENCIA, ENCARGOS_FOLHA } from './regras.js';
+import {
+  SEGMENTOS, POLITICA, SETORES, CAPITAL_REFERENCIA, ENCARGOS_FOLHA, SALARIO_MINIMO, LIMITE_SIMPLES, TOLERANCIA_EXCESSO,
+  LIMITE_ISENCAO_DIVIDENDOS, ALIQ_RETENCAO_DIVIDENDOS,
+} from './regras.js';
 import { liquidoProLabore } from './tributos.js';
 
 // Estado da empresa e indicadores derivados. Tudo aqui e funcao pura sobre o estado `s`,
@@ -141,12 +144,33 @@ export function migrarEstado(s) {
   if ((s.v || 1) < 2) {
     s.dec.producaoAuto = true; // v1 travava a producao no valor do mes 0
     s.politicaPaga = s.dec.politica;
-    s.prejuizoFiscal = s.regime === 'real' ? s.prejuizo.real : 0;
     s.financiadoMes = s.financiadoMes || 0;
-    s.dividendosDonoMes = s.dividendosDonoMes || 0;
-    s.irrfDivMes = s.irrfDivMes || 0;
-    // Fator R passou a contar 13o, ferias e FGTS (LC 123, art. 18 §24)
-    for (const h of s.hist) h.folhaFatorR = h.folha * (1 + ENCARGOS_FOLHA) + h.proLabore;
+    s.dec.proLabore = Math.max(SALARIO_MINIMO, s.dec.proLabore);
+    // Campos novos do historico, reconstruidos pela regra da v1 (o dono recebia 100% e a retencao
+    // era 10% do total do mes acima de R$ 50 mil): sem eles, o ajuste anual nao devolveria o IR retido.
+    const retV1 = v => (v > LIMITE_ISENCAO_DIVIDENDOS ? v * ALIQ_RETENCAO_DIVIDENDOS : 0);
+    const anoDe = m => Math.floor(m / 12), rbaAno = {};
+    let lalur = 0;
+    for (const h of s.hist) {
+      // Fator R passou a contar 13o, ferias e FGTS (LC 123, art. 18 §24)
+      h.folhaFatorR = h.folha * (1 + ENCARGOS_FOLHA) + h.proLabore;
+      h.dividendosDono ??= h.distribuido || 0;
+      h.irrfDividendos ??= retV1(h.distribuido || 0);
+      rbaAno[anoDe(h.mes)] = (rbaAno[anoDe(h.mes)] || 0) + h.receita;
+      h.rba ??= rbaAno[anoDe(h.mes)];
+      // Lalur refeito so com os meses apurados no Real (a v1 misturava o prejuizo simulado)
+      if (h.regime === 'real') lalur = h.lucroAntesIR <= 0 ? lalur - h.lucroAntesIR : lalur - Math.min(lalur, 0.3 * h.lucroAntesIR);
+    }
+    s.dividendosDonoMes = s.distribuidoMes || 0;
+    s.irrfDivMes = retV1(s.distribuidoMes || 0);
+    s.prejuizoFiscal = lalur;
+    if (s.regime === 'real') s.prejuizo.real = lalur;
+    // A v1 nunca desligava a exclusao do Simples; a v2 a recalcula pelo ano-calendario.
+    if (s.excluidoSimples) {
+      const receitaDoAno = a => soma(s.hist.filter(h => anoDe(h.mes) === a), h => h.receita);
+      const ano = anoDe(s.mes);
+      s.excluidoSimples = receitaDoAno(ano - 1) > LIMITE_SIMPLES || receitaDoAno(ano) > LIMITE_SIMPLES * (1 + TOLERANCIA_EXCESSO);
+    }
     s.v = 2;
   }
   return s;

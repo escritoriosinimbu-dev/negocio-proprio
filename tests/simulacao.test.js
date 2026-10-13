@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   novoJogo, fecharMes, patrimonio, comparativoDoAno, trocarRegime, SEGMENTOS, REGIMES, DURACAO, capacidades,
   comprar, contratarEmprestimo, quitarEmprestimo, distribuirLucros, resolverEvento, EVENTOS, jogoEncerrado,
-  migrarEstado, VERSAO_ESTADO,
+  migrarEstado, VERSAO_ESTADO, dicas, valorEmpresa,
 } from '../src/engine/index.js';
 import { jogar, semente, ESTRATEGIAS } from './ajuda.js';
 
@@ -149,6 +149,51 @@ describe('custeio por absorcao na industria', () => {
   });
 });
 
+describe('dicas e acontecimentos', () => {
+  it('em janeiro, nao recomenda o Simples quando ele esta fechado', () => {
+    const s = comHistorico(23, 12, 450000);
+    for (const h of s.hist) h.comp = { simples: 1, presumido: 100000, real: 100000 };
+    fecharMes(s, semente(1));
+    expect(s.excluidoSimples).toBe(true);
+    expect(dicas(s).some(([, x]) => x.includes('Simples Nacional teria custado'))).toBe(false);
+  });
+
+  it('o investidor nunca paga mais que 25% do valor da empresa por 20% dela', () => {
+    for (const segmento of SEGS) {
+      jogar({
+        segmento, estrategia: 'caotica', seed: 19, resolver: false, aoFechar: s => {
+          s.investidorUsado = false;
+          s.participacao = 1;
+          if (s.mes >= 6 && EVENTOS.investidor.cond(s)) {
+            expect(EVENTOS.investidor.montar(s).dados.valor).toBeLessThanOrEqual(0.25 * valorEmpresa(s) + 1e-6);
+          }
+        },
+      });
+    }
+  });
+
+  it('repassar o reajuste de materia-prima sobe o preco no mesmo valor do mercado', () => {
+    const s = novoJogo({ nome: 'X', segmento: 'confeccao', capital: 150000, emprestimo: 0, regime: 'simples' });
+    s.evento = { id: 'materia', ...EVENTOS.materia.montar(s) };
+    const { aumento } = s.evento.dados, preco = s.dec.preco, ref = s.precoRef;
+    resolverEvento(s, 1);
+    expect(s.precoRef).toBeCloseTo(ref + aumento, 6);
+    expect(s.dec.preco).toBeCloseTo(preco + aumento, 2);
+  });
+
+  it('pedido grande com producao manual avisa quando tira clientes normais', () => {
+    const s = jogar({ segmento: 'confeccao', meses: 6, seed: 2, resolver: false });
+    s.fim = null;
+    s.dec.producaoAuto = false;
+    s.dec.producao = 0;
+    s.estoque = 0;
+    s.dec.func = { ...s.func, producao: 12 }; // capacidade sobrando: o pedido caberia se produzisse
+    const e = EVENTOS.pedido.montar(s, () => 0.5);
+    expect(e.texto).toContain('sai dos seus clientes normais');
+    expect(e.texto).toContain('suba o plano de produção');
+  });
+});
+
 describe('pessoas', () => {
   it('a politica salarial nao pode baixar depois do primeiro mes', () => {
     const s = novoJogo({ nome: 'X', segmento: 'software', capital: 150000, emprestimo: 0, regime: 'simples' });
@@ -178,6 +223,52 @@ describe('socio', () => {
 });
 
 describe('estado salvo', () => {
+  function salvoV1(over = {}) {
+    const s = comHistorico(17, 12, 100000);
+    for (const h of s.hist) Object.assign(h, { folha: 10000, proLabore: 3000, distribuido: 0, regime: 'simples', lucroAntesIR: 1000 });
+    for (const k of ['politicaPaga', 'prejuizoFiscal', 'financiadoMes', 'dividendosDonoMes', 'irrfDivMes']) delete s[k];
+    s.v = 1;
+    return Object.assign(s, over);
+  }
+
+  it('v1: a retencao sobre lucros feita antes da atualizacao volta no ajuste anual', () => {
+    const s = salvoV1();
+    s.hist[3].distribuido = 60000; // retidos R$ 6 mil pela regra da v1
+    migrarEstado(s);
+    const antes = s.retirado;
+    const rnd = semente(3);
+    while (s.mes < 24) { fecharMes(s, rnd); s.evento = null; s.fim = null; }
+    expect(s.retirado - antes).toBeCloseTo(6000, 6);
+  });
+
+  it('v1: exclusao do Simples e recalculada pelo ano anterior', () => {
+    const s = salvoV1({ mes: 24, excluidoSimples: true, regime: 'presumido' });
+    s.hist = [];
+    for (let m = 0; m < 24; m++) s.hist.push({ mes: m, receita: m < 12 ? 450000 : 90000, folha: 10000, proLabore: 3000, folhaFatorR: 0, lucro: 0, comp: {}, regime: 'presumido', lucroAntesIR: 0 });
+    migrarEstado(s);
+    expect(trocarRegime(s, 'simples').ok).toBe(true);
+    expect(() => fecharMes(s, semente(1))).not.toThrow();
+  });
+
+  it('v1: o prejuizo fiscal e refeito so com os meses apurados no Real', () => {
+    const s = salvoV1({ regime: 'presumido' });
+    s.hist[0].regime = 'real'; s.hist[0].lucroAntesIR = -50000;
+    s.hist[1].regime = 'real'; s.hist[1].lucroAntesIR = 10000;
+    s.prejuizo.real = 999999; // prejuizo simulado que a v1 deixava vazar
+    migrarEstado(s);
+    expect(s.prejuizoFiscal).toBeCloseTo(50000 - 3000, 6);
+    s.mes = 24;
+    trocarRegime(s, 'real');
+    expect(s.prejuizo.real).toBeCloseTo(47000, 6);
+  });
+
+  it('v1: pro-labore abaixo do minimo de 2026 sobe para o minimo', () => {
+    const s = salvoV1();
+    s.dec.proLabore = 1518;
+    migrarEstado(s);
+    expect(s.dec.proLabore).toBe(1621);
+  });
+
   it('migra um jogo da versao 1 e continua jogando', () => {
     const s = jogar({ segmento: 'confeccao', meses: 5, seed: 6, resolver: false });
     s.fim = null;

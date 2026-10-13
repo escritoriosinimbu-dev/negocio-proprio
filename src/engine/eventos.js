@@ -1,6 +1,6 @@
 import { SEG, clamp, soma, patrimonio, valorEmpresa, capacidades, demandaEsperada } from './empresa.js';
 import { custoEquip } from './acoes.js';
-import { brl, brl2, num } from './formato.js';
+import { brl, brl2, num, pct } from './formato.js';
 
 // Acontecimentos sorteados no fechamento do mes. O estado guarda so { id, dados, titulo,
 // texto, opcoes } — serializavel — e a escolha e resolvida por EVENTOS[id].resolver.
@@ -14,12 +14,17 @@ export const EVENTOS = {
       const preco = Math.round(s.dec.preco * 0.8 * 100) / 100;
       // O pedido consome oferta (producao/estoque), nao atendimento: so tira cliente normal
       // quando a oferta nao cobre os dois.
+      // No plano manual da industria, a producao planejada nao sobe sozinha com o pedido.
       const c = capacidades(s, s.dec.func);
-      const oferta = seg.estocavel ? s.estoque + c.capacidade : c.capacidade;
+      const manual = seg.estocavel && !s.dec.producaoAuto;
+      const producao = manual ? Math.min(s.dec.producao, c.capacidade) : c.capacidade;
+      const oferta = seg.estocavel ? s.estoque + producao : producao;
       const jaPedido = soma(s.pedidos, p => p.qtd);
-      const folga = Math.max(0, oferta - jaPedido - Math.min(Math.round(demandaEsperada(s)), c.cobertura));
+      const ocupado = jaPedido + Math.min(Math.round(demandaEsperada(s)), c.cobertura);
+      const folga = Math.max(0, oferta - ocupado);
+      const cabeSeProduzir = manual && qtd <= s.estoque + c.capacidade - ocupado;
       const aviso = qtd > folga
-        ? ` Capacidade livre prevista: ${num(folga)} ${seg.unidades}; o que passar disso sai dos seus clientes normais, que pagam ${brl2(s.dec.preco)}.`
+        ? ` Capacidade livre prevista: ${num(folga)} ${seg.unidades}; o que passar disso sai dos seus clientes normais, que pagam ${brl2(s.dec.preco)}.${cabeSeProduzir ? ` Para não tirar clientes, suba o plano de produção na aba ${seg.setorProd}.` : ''}`
         : ` Capacidade livre prevista: ${num(folga)} ${seg.unidades}, o pedido cabe sem tirar ninguém.`;
       return {
         titulo: seg.tipo === 'servico' ? 'Um projeto grande na mesa' : 'Pedido grande',
@@ -93,9 +98,11 @@ export const EVENTOS = {
     },
   },
   investidor: {
-    cond: s => !s.investidorUsado && s.mes >= 6 && s.participacao === 1 && patrimonio(s) > 0,
+    // Sem piso: 20% depois do aporte so e justo ate 25% do valor de antes. Um piso fixo pagava
+    // acima disso a quem estava quebrando, e aceitar virava dinheiro gratis.
+    cond: s => !s.investidorUsado && s.mes >= 6 && s.participacao === 1 && patrimonio(s) > 0 && ofertaInvestidor(s) >= 10000,
     montar(s) {
-      const valor = Math.max(20000, Math.round(valorEmpresa(s) * 0.22 / 5000) * 5000);
+      const valor = ofertaInvestidor(s);
       return {
         titulo: 'Proposta de investidor',
         texto: `Um investidor-anjo oferece ${brl(valor)} por 20% da empresa. O dinheiro entra no caixa da empresa, e 20% do valor dela passa a ser dele até o fim do jogo. Pelo critério do jogo, a empresa vale hoje cerca de ${brl(valorEmpresa(s))}; a oferta a avalia em ${brl(4 * valor)} antes do aporte.`,
@@ -158,24 +165,26 @@ export const EVENTOS = {
   materia: {
     cond: () => true,
     montar(s) {
-      const servico = SEG(s).tipo === 'servico';
+      const seg = SEG(s), servico = seg.tipo === 'servico';
+      const aumento = Math.round(s.custoMat * 0.12 * 100) / 100;
       return {
         titulo: servico ? 'Licenças de software mais caras' : 'Fornecedor reajustou preços',
-        texto: servico
+        texto: (servico
           ? 'As ferramentas e servidores que você usa ficaram 12% mais caros.'
-          : 'O principal fornecedor reajustou a matéria-prima em 12%.',
-        dados: {}, opcoes: ['Absorver o aumento', 'Repassar 6% ao preço'],
+          : 'O principal fornecedor reajustou a matéria-prima em 12%.')
+          + ` Os concorrentes também repassaram: o preço de mercado sobe ${brl2(aumento)} por ${seg.unidade} (${pct(aumento / s.precoRef, 1)}).`,
+        dados: { aumento }, opcoes: ['Manter o preço', `Repassar o aumento (+${brl2(aumento)})`],
       };
     },
-    resolver(s, i) {
+    resolver(s, i, d) {
       // o reajuste atinge os concorrentes: o preco de mercado sobe o mesmo valor em reais
-      s.precoRef += s.custoMat * 0.12;
+      s.precoRef += d.aumento;
       s.custoMat *= 1.12;
       if (i === 1) {
-        s.dec.preco = Math.round(s.dec.preco * 1.06 * 100) / 100;
-        return 'Preço reajustado em 6%.';
+        s.dec.preco = Math.round((s.dec.preco + d.aumento) * 100) / 100;
+        return 'Preço reajustado no mesmo valor do mercado.';
       }
-      return 'Margem menor, preço mantido.';
+      return 'Preço mantido. Com o mercado mais caro, seu preço ficou relativamente menor: a procura sobe e a margem por unidade cai.';
     },
   },
   juros: {
@@ -250,6 +259,10 @@ export const EVENTOS = {
     },
   },
 };
+
+export function ofertaInvestidor(s) {
+  return Math.floor(valorEmpresa(s) * 0.22 / 5000) * 5000;
+}
 
 export function sortearEvento(s, rnd) {
   const ids = Object.keys(EVENTOS).filter(id => EVENTOS[id].cond(s));

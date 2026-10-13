@@ -8,7 +8,7 @@ Orientações para o Claude Code trabalhar neste repositório.
 npm test                 # vitest: testes do motor
 npm run build            # build web (Vite) em dist/
 npm run balanceamento    # 40 partidas automáticas por ramo/estratégia; rode após mexer em regras.js
-                         # referência: parada ~1,5–2,0 (C), ativa ~2,8–3,5 (B), caótica 100% falência
+                         # referência: parada ~1,4–2,0 (C/D), ativa ~2,8–3,5 (B), caótica 100% falência
 npm run android:sync     # build + cap sync android
 ```
 
@@ -67,6 +67,8 @@ LC 155/2016). Fatos que não são óbvios e que já custaram um erro:
   `package.json`. Suba a versão com `npm version patch` — o CI recusa tag diferente do `package.json`.
 - `capacitor.config.json` exige WebView 111 (`android.minWebViewVersion`); abaixo disso o app abre
   `public/webview-antiga.html`. O CSS usa `:has()` e `color-mix()`, que não existem em WebViews antigas.
+  Esse piso não vale para a Huawei WebView (`com.huawei.webview`, numeração própria): quem cobre esse caso
+  é a checagem de recursos no `<head>` do `index.html`, que redireciona para a mesma página.
 - Ícone e splash saem de `assets/` com `npx @capacitor/assets generate --android` (cores no README do
   commit que os gerou: fundo `#1C6A4B`/`#0D1511`, splash `#EAF0EA`/`#0D1511`).
 - As áreas seguras chegam pelo SystemBars do Capacitor como `--safe-area-inset-*` e são lidas no CSS
