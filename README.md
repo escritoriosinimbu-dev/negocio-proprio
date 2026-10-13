@@ -24,8 +24,7 @@ npm version patch        # ou minor; atualiza o package.json e cria a tag v0.1.1
 git push --follow-tags
 ```
 
-O APK aparece em **Releases**, pronto para baixar no celular (o repositório é privado: é preciso estar
-logado no GitHub). Na primeira instalação o Android pede para permitir "instalar apps desta fonte". Como
+O APK aparece em **Releases**, pronto para baixar no celular. Na primeira instalação o Android pede para permitir "instalar apps desta fonte". Como
 todos os APKs são assinados com a mesma chave de depuração (`android/app/debug.keystore`) e o
 `versionCode` sempre cresce, uma versão nova instala por cima da anterior sem perder o jogo salvo.
 
@@ -38,9 +37,12 @@ O mesmo jogo roda como site instalável. No iPhone: abrir o endereço no Safari 
 Adicionar à Tela de Início**. Ele ganha ícone, abre em tela cheia e funciona sem internet depois da
 primeira visita (iOS 16.4 ou mais novo). O jogo salvo fica no próprio aparelho, separado do APK.
 
+Endereço: **https://escritoriosinimbu-dev.github.io/negocio-proprio/**
+
 O workflow **Site** publica a cada push na `main`, em um destes dois lugares:
 
-- **GitHub Pages** — só com o repositório público (Settings → Pages → *Source: GitHub Actions*).
+- **GitHub Pages** — só com o repositório público (Settings → Pages → *Source: GitHub Actions*). É o
+  destino em uso.
 - **Cloudflare Pages** — funciona com o repositório privado. Basta cadastrar os segredos
   `CLOUDFLARE_API_TOKEN` (permissão *Cloudflare Pages: Edit*) e `CLOUDFLARE_ACCOUNT_ID` em
   Settings → Secrets and variables → Actions. O endereço fica `https://negocio-proprio.pages.dev`.
