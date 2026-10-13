@@ -5,7 +5,7 @@ import {
 } from './regras.js';
 import {
   SEG, clamp, soma, capacidades, demandaEsperada, salario, limiteCheque, politicaPermitida, planoProducaoAuto,
-  precoPelaMargem, premioSeguro, taxaPronampe, nivelEfetivo, indice, aluguelMes,
+  precoPelaMargem, premioSeguro, taxaPronampe, nivelEfetivo, indice, aluguelMes, precoJusto,
 } from './empresa.js';
 import { apurar, irrfProLabore } from './tributos.js';
 import { sortearEvento, sortearCrise, eventoRegime } from './eventos.js';
@@ -57,7 +57,7 @@ export function fecharMes(s, rnd = Math.random) {
   // 2. operacao
   // preco pela margem: recalculado com o custo de hoje (o reajuste do fornecedor passa sozinho para o preco)
   if (d.modoPreco === 'margem') d.preco = precoPelaMargem(s);
-  if (s.fornecedorArriscado && rnd() < 0.12) {
+  if (s.fornecedorArriscado && rnd() < 0.2) {
     s.efeitos.push({ tipo: 'producao', mult: 0.6, ate: s.mes + 1 });
     nots.push(['ruim', `O fornecedor novo atrasou a entrega de ${seg.insumo}: a produção do mês caiu 40%.`]);
   }
@@ -194,9 +194,10 @@ export function fecharMes(s, rnd = Math.random) {
     rbt12, fatorR, impedidoSublimite, absorvido, perdas, indice: indice(s),
   };
   const comp = {};
-  for (const r of REGIMES) comp[r] = r === 'simples' && s.excluidoSimples ? null : apurar(r, op, s.prejuizo[r]);
+  s.saldoCredor ??= {};
+  for (const r of REGIMES) comp[r] = r === 'simples' && s.excluidoSimples ? null : apurar(r, op, s.prejuizo[r], s.saldoCredor[r]);
   const ap = comp[s.regime];
-  for (const r of REGIMES) if (comp[r]) s.prejuizo[r] = comp[r].prejuizo;
+  for (const r of REGIMES) if (comp[r]) { s.prejuizo[r] = comp[r].prejuizo; s.saldoCredor[r] = comp[r].saldo; }
   if (s.regime === 'real') s.prejuizoFiscal = ap.prejuizo;
   // O mes do excesso ainda e do Simples; acima de 20% do limite, a exclusao vale a partir do mes seguinte.
   if (!s.excluidoSimples && rbaAntes + receita > LIMITE_SIMPLES * (1 + TOLERANCIA_EXCESSO)) {
@@ -221,7 +222,9 @@ export function fecharMes(s, rnd = Math.random) {
 
   // 6. mercado, qualidade e moral
   const fracFalta = demanda > 0 ? (demanda - vendidosN) / demanda : 0;
-  const alvoA = 8 + 80 * (1 - Math.exp(-d.marketing / seg.mkEscala)) + 15 * (s.Q - 50) / 50 - 30 * fracFalta;
+  // cobrar bem acima do preco justo gera fama de caro: a reputacao cai aos poucos
+  const abuso = Math.max(0, d.preco / precoJusto(s) - 1.1);
+  const alvoA = 8 + 80 * (1 - Math.exp(-d.marketing / seg.mkEscala)) + 15 * (s.Q - 50) / 50 - 30 * fracFalta - 100 * abuso;
   s.A = clamp(s.A + (alvoA - s.A) * 0.25, 0, 100);
   const alvoQ = 35 + 60 * (1 - Math.exp(-d.qualidade / seg.qEscala)) + 3 * nivelEfetivo(s.equipNivel);
   s.Q = clamp(s.Q + (alvoQ - s.Q) * 0.2, 0, 100);
@@ -256,11 +259,12 @@ export function fecharMes(s, rnd = Math.random) {
   else s.custoMat *= 1.004;
   s.precoRef *= 1.004;
   if (cf && s.mes + 1 >= cf.ate) {
-    const adiado = s.custoContratoAdiado || 1;
-    s.custoMat *= adiado;
+    // volta ao preco de mercado: desfaz o desconto do contrato e aplica os reajustes acumulados
+    const salto = (s.custoContratoAdiado || 1) / (cf.desconto || 1);
+    s.custoMat *= salto;
     s.contratoFornecedor = null;
     s.custoContratoAdiado = 1;
-    nots.push(['aviso', `O contrato com o fornecedor acabou: o custo de ${seg.insumo} volta ao preço de mercado (${adiado > 1.001 ? '+' + pct(adiado - 1, 1) : 'sem reajuste'}).`]);
+    nots.push(['aviso', `O contrato com o fornecedor acabou: o custo de ${seg.insumo} volta ao preço de mercado (${salto > 1.001 ? '+' + pct(salto - 1, 1) : 'sem reajuste'}).`]);
   }
   if (s.contratoCliente && s.mes + 1 >= s.contratoCliente.ate) {
     s.contratoCliente = null;
@@ -360,6 +364,13 @@ export function trocarRegime(s, regime) {
   // So o prejuizo apurado em meses no Lucro Real e compensavel (Lei 9.065/1995, art. 15); o do
   // comparativo, simulado com a empresa em outro regime, nunca existiu.
   if (regime === 'real' && s.regime !== 'real') s.prejuizo.real = s.prejuizoFiscal || 0;
+  // O saldo credor de ICMS e da empresa e segue com ela; o de PIS/COFINS so existe no nao cumulativo.
+  if (regime !== s.regime) {
+    s.saldoCredor ??= {};
+    const icms = (s.saldoCredor[s.regime] || {}).icms || 0;
+    s.saldoCredor[regime] = { icms, pis: 0, cofins: 0 };
+  }
+  if (regime === s.regime) return { ok: true, msg: `Regime mantido: ${NOME_REGIME[regime]}.` };
   s.regime = regime;
   return { ok: true, msg: 'Regime alterado.' };
 }

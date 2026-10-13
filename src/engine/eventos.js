@@ -1,5 +1,5 @@
 import {
-  SEG, clamp, soma, patrimonio, valorEmpresa, capacidades, demandaEsperada, totalReceber,
+  SEG, clamp, soma, patrimonio, valorEmpresa, capacidades, demandaEsperada, totalReceber, nivelEfetivo,
 } from './empresa.js';
 import { custoEquip, NIVEL_MAX_EQUIP } from './acoes.js';
 import { comparativoDoAno, trocarRegime } from './simulacao.js';
@@ -7,8 +7,15 @@ import { REGIMES, NOME_REGIME, HONORARIOS, MESES, CONCORRENCIA_MAX } from './reg
 import { brl, brl2, num, pct } from './formato.js';
 
 const mesNome = m => `${MESES[m % 12].toLowerCase()} do ano ${Math.floor(m / 12) + 1}`;
+// Contratos valem ate antes do mes `ate`: o ultimo mes de contrato e ate - 1.
+const fimDe = ate => `o fim de ${mesNome(ate - 1)}`;
 const contratoAtivo = s => !!(s.contratoFornecedor && s.mes < s.contratoFornecedor.ate);
 const efeitoAtivo = (s, tipo) => s.efeitos.filter(e => e.tipo === tipo && e.ate > s.mes).reduce((m, e) => m * e.mult, 1);
+const DESCONTO_FORNECEDOR_NOVO = 0.08;
+// Quantidade do contrato com a rede que entra no mes corrente.
+export function qtdContratoCliente(s) {
+  return s.contratoCliente && s.mes < s.contratoCliente.ate ? s.contratoCliente.qtd : 0;
+}
 // Margem liquida dos ultimos 12 meses.
 function margem12(s) {
   const h = s.hist.slice(-12), r = soma(h, x => x.receita);
@@ -43,7 +50,7 @@ export const EVENTOS = {
       const manual = seg.estocavel && !s.dec.producaoAuto;
       const producao = manual ? Math.min(s.dec.producao, c.capacidade) : c.capacidade;
       const oferta = seg.estocavel ? s.estoque + producao : producao;
-      const jaPedido = soma(s.pedidos, p => p.qtd);
+      const jaPedido = soma(s.pedidos, p => p.qtd) + qtdContratoCliente(s);
       const ocupado = jaPedido + Math.min(Math.round(demandaEsperada(s)), c.cobertura);
       const folga = Math.max(0, oferta - ocupado);
       const cabeSeProduzir = manual && qtd <= s.estoque + c.capacidade - ocupado;
@@ -224,9 +231,12 @@ export const EVENTOS = {
         titulo: 'Reajuste no mercado de insumos',
         texto: `O preço de ${seg.insumo} subiu 12% no mercado.`
           + (travado
-            ? ` O seu contrato com o fornecedor trava o preço até ${mesNome(s.contratoFornecedor.ate)}: o reajuste não chega a você por enquanto. Os concorrentes repassaram, e o preço de mercado sobe ${brl2(aumento)}.`
+            ? ` O seu contrato com o fornecedor trava o preço até ${fimDe(s.contratoFornecedor.ate)}: o reajuste não chega a você por enquanto. Os concorrentes repassaram, e o preço de mercado sobe ${brl2(aumento)}.`
             : ` Os concorrentes também repassaram: o preço de mercado sobe ${brl2(aumento)} por ${seg.unidade} (${pct(aumento / s.precoRef, 1)}).`),
-        dados: { aumento }, opcoes: ['Manter o preço', `Repassar o aumento (+${brl2(aumento)})`],
+        dados: { aumento, margem: s.dec.modoPreco === 'margem' },
+        opcoes: s.dec.modoPreco === 'margem'
+          ? ['Seguir com a margem (o preço acompanha o custo)', `Repassar só o aumento do mercado (+${brl2(aumento)})`]
+          : ['Manter o preço', `Repassar o aumento (+${brl2(aumento)})`],
       };
     },
     resolver(s, i, d) {
@@ -234,6 +244,10 @@ export const EVENTOS = {
       s.precoRef += d.aumento;
       if (contratoAtivo(s)) s.custoContratoAdiado = (s.custoContratoAdiado || 1) * 1.12;
       else s.custoMat *= 1.12;
+      if (i === 0 && d.margem) {
+        s.dec.modoPreco = 'margem';
+        return 'O preço segue a margem: no fechamento ele sobe junto com o custo.';
+      }
       if (i === 1) {
         s.dec.modoPreco = 'preco';
         s.dec.preco = Math.round((s.dec.preco + d.aumento) * 100) / 100;
@@ -281,7 +295,7 @@ export const EVENTOS = {
       const custo = custoEquip(s);
       return {
         titulo: 'Linha de crédito para máquinas',
-        texto: `Um banco de fomento oferece financiar o próximo nível de equipamento (${brl(custo)}) a 1,2% ao mês, em 48 parcelas. Produtividade +${Math.round(SEG(s).ganhoEquip * 100)}%.`,
+        texto: `Um banco de fomento oferece financiar o próximo nível de equipamento (${brl(custo)}) a 1,2% ao mês, em 48 parcelas. Produtividade +${Math.round(SEG(s).ganhoEquip * (nivelEfetivo(s.equipNivel + 1) - nivelEfetivo(s.equipNivel)) * 100)}%.`,
         dados: { custo }, opcoes: ['Financiar o equipamento', 'Agora não'],
       };
     },
@@ -299,20 +313,22 @@ export const EVENTOS = {
 
   // --- fornecedores ---
   fornecedorNovo: {
-    cond: s => !s.fornecedorArriscado && !contratoAtivo(s) && s.mes >= 3,
+    // uma vez por partida: sem isso, descontos de fornecedores novos se empilhavam
+    cond: s => !s.fornecedorNovoUsado && !s.fornecedorArriscado && !contratoAtivo(s) && s.mes >= 3,
     montar(s) {
       const seg = SEG(s);
       return {
         titulo: 'Fornecedor mais barato',
-        texto: `Um fornecedor novo oferece ${seg.insumo} 15% mais baratos (${brl2(s.custoMat * 0.85)} em vez de ${brl2(s.custoMat)} por ${seg.unidade}). Ele não tem histórico: se atrasar uma entrega, a produção daquele mês cai.`,
+        texto: `Um fornecedor novo oferece ${seg.insumo} 8% mais baratos (${brl2(s.custoMat * (1 - DESCONTO_FORNECEDOR_NOVO))} em vez de ${brl2(s.custoMat)} por ${seg.unidade}). Ele não tem histórico: em cerca de 1 mês a cada 5 ele atrasa, e a produção daquele mês cai 40%.`,
         dados: {}, opcoes: ['Trocar de fornecedor', 'Ficar com o atual'],
       };
     },
     resolver(s, i) {
+      s.fornecedorNovoUsado = true;
       if (i !== 0) return 'Você ficou com o fornecedor de sempre.';
-      s.custoMat *= 0.85;
+      s.custoMat *= 1 - DESCONTO_FORNECEDOR_NOVO;
       s.fornecedorArriscado = true;
-      return 'Custo 15% menor. Em cerca de 1 mês a cada 8, a entrega pode atrasar.';
+      return 'Custo 8% menor. Em cerca de 1 mês a cada 5, a entrega pode atrasar.';
     },
   },
   negociacao: {
@@ -339,8 +355,10 @@ export const EVENTOS = {
         return 'O fornecedor não cedeu: reajuste de 10%.';
       }
       s.efeitos.push({ tipo: 'producao', mult: 0.85, ate: s.mes + 1 });
+      // saindo do fornecedor barato, volta a pagar o preco de mercado
+      if (s.fornecedorArriscado) s.custoMat /= 1 - DESCONTO_FORNECEDOR_NOVO;
       s.fornecedorArriscado = false;
-      return 'Fornecedor trocado sem aumento. A transição deve custar 15% da produção neste mês.';
+      return 'Fornecedor trocado sem aumento sobre o preço de mercado. A transição deve custar 15% da produção neste mês.';
     },
   },
   contratoFornecedor: {
@@ -349,17 +367,17 @@ export const EVENTOS = {
       const seg = SEG(s), minimo = Math.round(volumeMedio(s) * 0.7 / 10) * 10;
       return {
         titulo: 'Contrato com o fornecedor',
-        texto: `O fornecedor de ${seg.insumo} propõe um contrato de 12 meses: 6% de desconto e preço travado, sem os reajustes do mercado. Em troca, você se compromete a comprar pelo menos ${num(minimo)} ${seg.unidades} por mês; o que faltar paga 30% do valor como multa.`,
+        texto: `O fornecedor de ${seg.insumo} propõe um contrato de 12 meses: 6% de desconto e preço travado, sem os reajustes do mercado. No fim, o custo volta ao preço de mercado da época. Em troca, você se compromete a comprar pelo menos ${num(minimo)} ${seg.unidades} por mês; o que faltar paga 30% do valor como multa.`,
         dados: { minimo }, opcoes: ['Assinar o contrato', 'Recusar'],
       };
     },
     resolver(s, i, d) {
       if (i !== 0) return 'Contrato recusado. Você segue livre, e exposto aos reajustes.';
       s.custoMat *= 0.94;
-      s.contratoFornecedor = { ate: s.mes + 12, minimo: d.minimo };
+      // o desconto vale so durante o contrato: no fim, o custo volta ao de mercado
+      s.contratoFornecedor = { ate: s.mes + 12, minimo: d.minimo, desconto: 0.94 };
       s.custoContratoAdiado = 1;
-      s.fornecedorArriscado = false;
-      return `Contrato assinado até ${mesNome(s.mes + 12)}.`;
+      return `Contrato assinado até ${fimDe(s.mes + 12)}.`;
     },
   },
 
@@ -378,7 +396,7 @@ export const EVENTOS = {
     resolver(s, i, d) {
       if (i !== 0) return 'Contrato recusado.';
       s.contratoCliente = { qtd: d.qtd, preco: d.preco, ate: s.mes + 12 };
-      return `Contrato assinado: ${num(d.qtd)} ${SEG(s).unidades} por mês até ${mesNome(s.mes + 12)}.`;
+      return `Contrato assinado: ${num(d.qtd)} ${SEG(s).unidades} por mês até ${fimDe(s.mes + 12)}.`;
     },
   },
   inadimplencia: {

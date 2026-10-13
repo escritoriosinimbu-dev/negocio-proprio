@@ -2,7 +2,7 @@ import {
   SEGMENTOS, POLITICA, SETORES, CAPITAL_REFERENCIA, ENCARGOS_FOLHA, SALARIO_MINIMO, LIMITE_SIMPLES, TOLERANCIA_EXCESSO,
   LIMITE_ISENCAO_DIVIDENDOS, ALIQ_RETENCAO_DIVIDENDOS, HONORARIOS, SELIC_INICIAL, SPREAD_GIRO, SPREAD_PRONAMPE,
 } from './regras.js';
-import { liquidoProLabore } from './tributos.js';
+import { liquidoProLabore, apurar } from './tributos.js';
 
 // Estado da empresa e indicadores derivados. Tudo aqui e funcao pura sobre o estado `s`,
 // que e um objeto JSON simples (vai inteiro para o armazenamento do aparelho).
@@ -44,6 +44,8 @@ export function novoJogo({ nome, segmento, capital, emprestimo, regime }) {
     emprestimos: emprestimo > 0 ? [{ nome: 'Pronampe', saldo: emprestimo, taxa: taxaPronampe(SELIC_INICIAL), amort: emprestimo / 36, posFixado: true }] : [],
     recebiveis: [], pedidos: [], efeitos: [], extras: 0, salExtra: 0,
     prejuizo: { simples: 0, presumido: 0, real: 0 },
+    // saldo credor de ICMS e PIS/COFINS por regime (o comparativo simula os tres)
+    saldoCredor: {},
     hist: [], negativos: 0, fim: null, evento: null, modoLivre: false,
     excluidoSimples: false, investidorUsado: false, creditoUsado: false,
     investidoMes: 0, captadoMes: 0, distribuidoMes: 0, quitadoMes: 0, financiadoMes: 0,
@@ -109,7 +111,8 @@ export function demandaEsperada(s, d = s.dec) {
 
 // Plano automatico da industria: procura prevista + 5% + pedidos especiais - estoque.
 export function planoProducaoAuto(s) {
-  return Math.max(0, Math.round((demandaEsperada(s) * 1.05 + soma(s.pedidos, p => p.qtd) - s.estoque) / 10) * 10);
+  const contrato = s.contratoCliente && s.mes < s.contratoCliente.ate ? s.contratoCliente.qtd : 0;
+  return Math.max(0, Math.round((demandaEsperada(s) * 1.05 + soma(s.pedidos, p => p.qtd) + contrato - s.estoque) / 10) * 10);
 }
 
 // Indice de reajuste acumulado (salarios, aluguel, honorarios): sobe todo janeiro.
@@ -135,14 +138,23 @@ export function folhaPrevista(s, func = s.dec.func, politica = s.dec.politica) {
 export function aliqVendaEstimada(s) {
   const h = s.hist.at(-1);
   if (h && h.receita > 0) return h.tribVenda / h.receita;
-  return s.regime === 'simples' ? 0.06 : s.regime === 'presumido' ? 0.0365 + (SEG(s).iss || 0) : 0.07;
+  // antes do primeiro mes: apura um mes tipico com a procura e o preco atuais
+  const seg = SEG(s), qtd = Math.max(1, procuraDoMercado(s)), receita = qtd * s.dec.preco, compras = qtd * s.custoMat;
+  const op = {
+    seg, receita, compras, cmv: compras, folha: 0, proLabore: s.dec.proLabore, despesas: 0, aluguel: 0, utilidades: 0,
+    depreciacao: 0, juros: 0, rbt12: receita * 12, fatorR: 0.3, impedidoSublimite: false,
+  };
+  return apurar(s.regime, op, 0).tribVenda / receita;
 }
 // Parte variavel de "outras despesas": energia, gas e taxas de cartao (2,5% da receita).
 export const DESPESA_VARIAVEL = 0.025;
 
+// Custo do insumo por unidade vendida. A perda de estoque (mercadinho) e a do estoque que ja existe,
+// rateada pelas vendas previstas: a mesma regra do fechamento.
 export function custoInsumoUnit(s) {
   const seg = SEG(s);
-  return s.custoMat * (seg.tipo === 'comercio' && !seg.estocavel ? 1.06 : 1) / (1 - (seg.perecivel || 0));
+  const perda = seg.perecivel && s.estoque > 0 ? s.valorEstoque * seg.perecivel / Math.max(1, demandaEsperada(s)) : 0;
+  return s.custoMat * (seg.tipo === 'comercio' && !seg.estocavel ? 1.06 : 1) + perda;
 }
 
 // Quanto sobra de cada unidade vendida para pagar os custos fixos e dar lucro.
@@ -150,10 +162,17 @@ export function margemContribuicao(s, preco = s.dec.preco) {
   return preco * (1 - aliqVendaEstimada(s) - DESPESA_VARIAVEL) - custoInsumoUnit(s);
 }
 
-// Preco que da a margem de contribuicao desejada (fracao do preco).
+// Maior margem que da para pedir: o resto do preco ainda precisa cobrir tributos e despesas variaveis.
+export function margemMaxima(s) {
+  return Math.floor((1 - aliqVendaEstimada(s) - DESPESA_VARIAVEL - 0.02) * 100) / 100;
+}
+
+// Preco que da a margem de contribuicao desejada (fracao do preco), dentro da mesma faixa do preco
+// manual (60% a 160% do mercado).
 export function precoPelaMargem(s, margem = s.dec.margemAlvo) {
-  const livre = 1 - margem - aliqVendaEstimada(s) - DESPESA_VARIAVEL;
-  return Math.round(custoInsumoUnit(s) / Math.max(0.05, livre) * 100) / 100;
+  const livre = 1 - Math.min(margem, margemMaxima(s)) - aliqVendaEstimada(s) - DESPESA_VARIAVEL;
+  const preco = custoInsumoUnit(s) / Math.max(0.01, livre);
+  return Math.round(clamp(preco, 0.6 * precoMercado(s), 1.6 * precoMercado(s)) * 100) / 100;
 }
 
 export function premioSeguro(s) {
@@ -272,6 +291,7 @@ export function migrarEstado(s) {
     s.selicTendencia = 0;
     delete s.ajusteJuros;
     s.indice = 1;
+    s.saldoCredor = {};
     s.concorrencia = 0;
     s.carteira = 0;
     s.contratoFornecedor = null;

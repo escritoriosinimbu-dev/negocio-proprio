@@ -25,11 +25,17 @@ export function anexoSimples(tipo, fatorR, anexoFixo = null) {
   return fatorR >= FATOR_R_MINIMO ? 'III' : 'V';
 }
 
-// ICMS (estadual) e ISS (municipal) pelas regras normais, fora do Simples.
-function tributosLocais(seg, op, det, sufixo = '') {
+// Parcela de PIS + COFINS na reparticao do DAS do Anexo I (faixas 1 a 5).
+const PARTILHA_PIS_COFINS_I = 0.155;
+
+// ICMS (estadual) e ISS (municipal) pelas regras normais, fora do Simples. O credito de ICMS que
+// passa do debito nao se perde: vira saldo credor para os meses seguintes (LC 87/1996, art. 24, III).
+function tributosLocais(seg, op, det, saldo, sufixo = '') {
   let total = 0;
   if (seg.icms) {
-    const icms = Math.max(0, op.receita * seg.icms.aliq - (seg.icms.credito ? op.compras * seg.icms.aliq : 0));
+    const apurado = op.receita * seg.icms.aliq - (seg.icms.credito ? op.compras * seg.icms.aliq : 0) - saldo.icms;
+    const icms = Math.max(0, apurado);
+    saldo.icms = Math.max(0, -apurado);
     det.push({ nome: seg.icms.nome + sufixo, valor: icms });
     total += icms;
   }
@@ -41,18 +47,20 @@ function tributosLocais(seg, op, det, sufixo = '') {
   return total;
 }
 
-function apurarSimples(seg, op, det) {
+function apurarSimples(seg, op, det, saldo) {
   const anexo = anexoSimples(seg.tipo, op.fatorR, seg.anexoFixo);
   const faixa = Math.min(4, faixaSimples(anexo, op.rbt12));
   const teto = seg.iss ? TETO_ISS_DAS : 1;
   let aliq = aliqEfetiva(anexo, op.rbt12);
+  // Receita monofasica ou de aliquota zero sai do PIS/COFINS dentro do DAS (LC 123, art. 18 §4o-A, I).
+  if (seg.fracaoTributadaPisCofins && anexo === 'I') aliq -= aliq * PARTILHA_PIS_COFINS_I * (1 - seg.fracaoTributadaPisCofins);
   // Impedida de recolher ICMS/ISS no Simples com RBT12 ate R$ 3,6 mi: tira a parcela local do DAS,
   // que passa a ser paga por fora (na 6a faixa a reparticao ja nao tem ICMS/ISS).
   if (op.impedidoSublimite && op.rbt12 <= SUBLIMITE) aliq -= Math.min(teto, aliq * PARTILHA_LOCAL[anexo][faixa]);
   let total = op.receita * aliq;
   det.push({ nome: `DAS — Anexo ${anexo} (alíquota efetiva ${pct(aliq, 2)})`, valor: total });
   if (op.impedidoSublimite) {
-    total += tributosLocais(seg, op, det, ' — fora do DAS (sublimite)');
+    total += tributosLocais(seg, op, det, saldo, ' — fora do DAS (sublimite)');
   } else if (op.rbt12 > SUBLIMITE) {
     // 6a faixa sem impedimento: ICMS/ISS seguem no DAS calculados pela 5a faixa (Res. CGSN 140, art. 21, III, b).
     const f = ANEXOS[anexo][4];
@@ -64,18 +72,23 @@ function apurarSimples(seg, op, det) {
   return { anexo, aliq, tribVenda: total };
 }
 
-function apurarPisCofins(regime, seg, op, det) {
+function apurarPisCofins(regime, seg, op, det, saldo) {
   const naoCumulativo = regime === 'real' && !seg.pisCofinsCumulativo;
   // ICMS destacado fora da base do PIS/COFINS (STF, Tema 69) e da base do credito (Lei 14.592/2023).
   const icmsDestacado = seg.icms && seg.icms.credito ? seg.icms.aliq : 0;
-  const base = op.receita * (1 - icmsDestacado);
+  const tributada = seg.fracaoTributadaPisCofins ?? 1;
+  const base = op.receita * (1 - icmsDestacado) * tributada;
   const sobre = icmsDestacado ? ' sobre a receita sem ICMS' : '';
   let pis = base * (naoCumulativo ? 0.0165 : 0.0065);
   let cofins = base * (naoCumulativo ? 0.076 : 0.03);
   if (naoCumulativo) {
-    const credito = op.compras * (seg.creditoCompras ?? 1) * (1 - icmsDestacado) + op.aluguel + op.utilidades + op.depreciacao;
-    pis = Math.max(0, pis - credito * 0.0165);
-    cofins = Math.max(0, cofins - credito * 0.076);
+    const credito = op.compras * (seg.creditoCompras ?? tributada) * (1 - icmsDestacado) + op.aluguel + op.utilidades + op.depreciacao;
+    // credito que passa do debito fica como saldo para os meses seguintes (Lei 10.833/2003, art. 3o §4o)
+    const p = pis - credito * 0.0165 - saldo.pis, c = cofins - credito * 0.076 - saldo.cofins;
+    pis = Math.max(0, p);
+    cofins = Math.max(0, c);
+    saldo.pis = Math.max(0, -p);
+    saldo.cofins = Math.max(0, -c);
     det.push({ nome: `PIS não cumulativo (1,65%${sobre} − créditos)`, valor: pis });
     det.push({ nome: `COFINS não cumulativa (7,6%${sobre} − créditos)`, valor: cofins });
   } else {
@@ -93,18 +106,20 @@ function apurarPisCofins(regime, seg, op, det) {
 // `perdas` sao baixas sem saida de caixa (cliente que nao pagou): reduzem o lucro.
 // `absorvido` e a parte da folha da fabrica que foi para o estoque (custeio por absorcao): saiu
 // do caixa, mas so vira resultado quando a peca e vendida (e ai esta dentro do cmv).
-export function apurar(regime, op, prejuizoAnt) {
+// `saldoAnt`: saldo credor de ICMS e PIS/COFINS vindo do mes anterior; o novo volta em `saldo`.
+export function apurar(regime, op, prejuizoAnt, saldoAnt = null) {
   const seg = op.seg;
+  const saldo = { icms: 0, pis: 0, cofins: 0, ...(saldoAnt || {}) };
   const det = [];
   const contador = HONORARIOS[regime] * (op.indice || 1);
   const encargos = op.folha * ENCARGOS_FOLHA;
   let cpp = 0, anexo = null, aliq = null, tribVenda = 0, prejuizo = prejuizoAnt;
 
   if (regime === 'simples') {
-    ({ anexo, aliq, tribVenda } = apurarSimples(seg, op, det));
+    ({ anexo, aliq, tribVenda } = apurarSimples(seg, op, det, saldo));
   } else {
     cpp = op.folha * 0.278 * 1.2 + op.proLabore * 0.20;
-    tribVenda = apurarPisCofins(regime, seg, op, det) + tributosLocais(seg, op, det);
+    tribVenda = apurarPisCofins(regime, seg, op, det, saldo) + tributosLocais(seg, op, det, saldo);
     det.push({ nome: 'INSS patronal + RAT + terceiros', valor: cpp });
   }
 
@@ -137,7 +152,7 @@ export function apurar(regime, op, prejuizoAnt) {
 
   return {
     regime, anexo, aliq, tribVenda, encargos, cpp, irpj, csll, contador, lucroAntesIR,
-    lucro: lucroAntesIR - irpj - csll, det, prejuizo, totalTributos: tribVenda + cpp + irpj + csll,
+    lucro: lucroAntesIR - irpj - csll, det, prejuizo, saldo, totalTributos: tribVenda + cpp + irpj + csll,
   };
 }
 

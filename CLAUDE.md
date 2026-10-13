@@ -72,7 +72,17 @@ LC 155/2016). Fatos que não são óbvios e que já custaram um erro:
    uma vez no fim. **Selic**: Pronampe (`posFixado`) muda de taxa todo mês; capital de giro fica com a do dia.
 5. **Reajuste anual** (`s.indice`, +5% todo janeiro) vale para salários, aluguel e honorários. Sem ele, preço
    subindo com a inflação e custo fixo parado tornava o jogo fácil demais no ano 3.
-6. **Balanceamento.** O robô "parada" reajusta o preço pelo mercado uma vez por ano e mantém o regime; o "ativo"
+6. **Saldo credor.** ICMS e PIS/COFINS com crédito maior que o débito não zeram: o excedente vai para
+   `s.saldoCredor[regime]` (LC 87/1996, art. 24, III; Lei 10.833/2003, art. 3º §4º), simulado por regime como o
+   prejuízo. Na troca de regime, o saldo de ICMS segue a empresa e o de PIS/COFINS zera.
+7. **Revenda com alíquota zero.** No mercadinho, `fracaoTributadaPisCofins` (40%) reduz a base do débito *e* do
+   crédito; no Simples, sai do DAS a parcela de PIS/COFINS (15,5% do Anexo I) sobre os outros 60%. Reduzir só o
+   crédito cobrava PIS/COFINS sobre cesta básica.
+8. **Preço abusivo.** Acima de 110% do preço justo, a reputação cai (`abuso` em `fecharMes`); e o mercadinho tem
+   elasticidade 5. Sem isso, cobrar 20–30% acima do mercado sem gerir nada vencia as estratégias ativas.
+9. **Fornecedor barato** aparece uma vez por partida (`fornecedorNovoUsado`); trocar de fornecedor devolve o preço
+   de mercado e o fim do contrato desfaz o desconto (`contratoFornecedor.desconto`). Antes os descontos se empilhavam.
+10. **Balanceamento.** O robô "parada" reajusta o preço pelo mercado uma vez por ano e mantém o regime; o "ativo"
    acompanha o mercado e escolhe o regime mais barato em janeiro. Escolher o regime ao acaso quebrava metade das
    partidas. O mercadinho é o ramo arriscado de propósito (margem curta).
 

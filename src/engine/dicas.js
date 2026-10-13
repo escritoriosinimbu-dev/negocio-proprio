@@ -1,6 +1,6 @@
 import { NOME_REGIME, REGIMES } from './regras.js';
 import {
-  SEG, capacidades, margemContribuicao, pontoEquilibrio, precoJusto, dividaTotal,
+  SEG, capacidades, margemContribuicao, pontoEquilibrio, precoJusto, dividaTotal, procuraDoMercado,
 } from './empresa.js';
 import { comparativoDoAno } from './simulacao.js';
 import { brl, brl2, num, pct } from './formato.js';
@@ -13,13 +13,17 @@ export function dicas(s) {
   if (s.caixa < 0) out.push(['ruim', `O caixa está negativo há ${s.negativos} mês(es). Corte custos, pegue capital de giro na aba Finanças ou aumente as vendas.`]);
   if (h) {
     if (h.faltaProduto > h.demanda * 0.08) {
-      out.push(['ruim', seg.estocavel
+      out.push(['ruim', seg.revenda
+        ? 'Faltou mercadoria. Aumente o plano de compras ou contrate na reposição.'
+        : seg.estocavel
         ? 'Faltou produto. Produza mais, contrate na fábrica ou compre equipamento.'
         : `Faltou capacidade ${seg.noSetorProd}. Contrate ou invista em equipamento.`]);
     }
     if (h.faltaAtend > h.demanda * 0.08) out.push(['ruim', `Faltou gente ${seg.noSetorCom}: havia cliente, mas ninguém para atender. Contrate ${seg.umCargoCom}.`]);
     const usado = seg.estocavel ? h.produzido : h.vendidos;
-    if (h.capacidade > 0 && usado < h.capacidade * 0.6 && h.faltaAtend < h.demanda * 0.05) {
+    // na carteira, a procura ainda esta subindo nos primeiros meses: equipe sobrando e investimento
+    const carteiraCrescendo = seg.recorrente && s.carteira < procuraDoMercado(s) * 0.95;
+    if (h.capacidade > 0 && usado < h.capacidade * 0.6 && h.faltaAtend < h.demanda * 0.05 && !carteiraCrescendo) {
       out.push(['aviso', `Capacidade ociosa: a equipe ${seg.noSetorProd} pode fazer ${num(h.capacidade)} e foram usadas ${num(usado)}. Mais marketing, preço menor ou equipe menor.`]);
     }
     if (seg.estocavel && s.estoque > h.vendidos * 1.5 && s.estoque > 300) out.push(['aviso', `Estoque de ${num(s.estoque)} ${seg.unidades} parado. Estoque é dinheiro empatado e custa armazenagem.`]);
@@ -41,7 +45,7 @@ export function dicas(s) {
   const justo = precoJusto(s);
   if (s.dec.preco > justo * 1.15) out.push(['aviso', `Seu preço está ${pct(s.dec.preco / justo - 1)} acima do que o cliente acha justo pela sua qualidade e reputação (${brl2(justo)}). Preço alto pede qualidade e marca à altura.`]);
   if (s.concorrencia >= 0.15) out.push(['aviso', `A concorrência já leva ${pct(s.concorrencia)} da sua procura. Qualidade e reputação seguram cliente; preço baixo demais só troca margem por volume.`]);
-  if (s.selic >= 0.16 && s.emprestimos.some(e => e.posFixado) && s.caixa > dividaTotal(s) * 1.5) out.push(['aviso', `Selic em ${pct(s.selic, 2)}: o Pronampe é pós-fixado e ficou mais caro. Com o caixa folgado, quitar pode valer a pena.`]);
+  if (s.selic >= 0.14 && s.emprestimos.some(e => e.posFixado) && s.caixa > dividaTotal(s) * 1.5) out.push(['aviso', `Selic em ${pct(s.selic, 2)}: o Pronampe é pós-fixado e ficou mais caro. Com o caixa folgado, quitar pode valer a pena.`]);
   if (s.contratoFornecedor && s.contratoFornecedor.ate - s.mes === 1) out.push(['aviso', 'O contrato com o fornecedor acaba no fim deste mês: o custo volta ao preço de mercado, com os reajustes acumulados.']);
   if (!s.dec.seguro && s.imobilizado - s.deprecAcum > 80000) out.push(['', 'Sem seguro empresarial: uma enchente ou uma quebra grande sai inteira do caixa. Veja a aba Finanças.']);
   if (c.desorg) out.push(['ruim', `A administração não dá conta de ${c.total} pessoas (limite ${c.capAdm}). Produtividade cai e o risco de multa sobe. Contrate no administrativo.`]);

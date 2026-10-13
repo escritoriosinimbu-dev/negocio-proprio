@@ -27,7 +27,7 @@ export const SEGMENTOS = {
   confeccao: {
     nome: 'Confecção', tipo: 'industria', unidade: 'camiseta', unidades: 'camisetas',
     desc: 'Fábrica de camisetas. Pode produzir para estoque e vender depois — o Natal agradece.',
-    precoRef: 59, custoMat: 23, prodPorFunc: 380, mercado: 2200, elasticidade: 3, estocavel: true,
+    precoRef: 59, custoMat: 23, prodPorFunc: 380, mercado: 2350, elasticidade: 3, estocavel: true,
     aluguel: 4000, salProd: 2100, salCom: 2400, salAdm: 2700, capVenda: 600, capDono: 400,
     mkEscala: 3500, qEscala: 2500, setup: 55000, equipCusto: 35000, ganhoEquip: 0.2,
     icms: { aliq: 0.18, credito: true, nome: 'ICMS (débito − crédito)' }, iss: 0,
@@ -88,7 +88,7 @@ export const SEGMENTOS = {
   mercadinho: {
     nome: 'Mercadinho de bairro', tipo: 'comercio', unidade: 'compra', unidades: 'compras',
     desc: 'Revende mercadoria com margem curta e giro alto. Estoque parado estraga, e cada reajuste não repassado come o lucro. O ramo mais arriscado.',
-    precoRef: 85, custoMat: 58, prodPorFunc: 1100, mercado: 2450, elasticidade: 3, estocavel: true,
+    precoRef: 85, custoMat: 56, prodPorFunc: 1100, mercado: 2450, elasticidade: 5, estocavel: true,
     aluguel: 4000, salProd: 1900, salCom: 1850, salAdm: 2600, capVenda: 800, capDono: 450,
     mkEscala: 3000, qEscala: 2500, setup: 50000, equipCusto: 25000, ganhoEquip: 0.15,
     icms: { aliq: 0.12, credito: true, nome: 'ICMS (débito − crédito, cesta básica reduzida)' }, iss: 0,
@@ -101,8 +101,9 @@ export const SEGMENTOS = {
     revenda: true,
     // Perda mensal do estoque (validade, avaria, furto).
     perecivel: 0.03,
-    // Cesta basica com aliquota zero e bebidas e higiene monofasicas: so parte das compras da credito.
-    creditoCompras: 0.4,
+    // Cesta basica com aliquota zero na venda (Lei 10.925/2004, art. 1o) e bebidas e higiene monofasicas
+    // (aliquota zero na revenda): so 40% da receita paga PIS/COFINS, e so as compras desses 40% dao credito.
+    fracaoTributadaPisCofins: 0.4,
     expansoes: [
       { id: 'app', nome: 'Delivery por aplicativo', desc: 'Pedidos pelo celular. Mercado +25%.', custo: 12000, mult: 0.25, aluguel: 0 },
       { id: 'hortifruti', nome: 'Hortifrúti e padaria', desc: 'Seções novas que trazem cliente todo dia. Mercado +35%.', custo: 40000, mult: 0.35, aluguel: 0 },

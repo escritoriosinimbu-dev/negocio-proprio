@@ -7,7 +7,7 @@ import {
   riquezaDono, lucroDisponivel, notaFinal, multiploNota, CAPITAL_REFERENCIA, politicaPermitida, planoProducaoAuto,
   migrarEstado, liquidoProLabore, irrfDaDistribuicao, jogoEncerrado,
   precoJusto, precoMercado, margemContribuicao, precoPelaMargem, pontoEquilibrio, custosFixos, aliqVendaEstimada,
-  custoInsumoUnit, DESPESA_VARIAVEL, premioSeguro, indice, aluguelMes, CONCORRENCIA_MAX, efeito,
+  custoInsumoUnit, DESPESA_VARIAVEL, premioSeguro, indice, aluguelMes, efeito, margemMaxima, qtdContratoCliente,
   custoEquip, custoEspaco, comprar, contratarEmprestimo, quitarEmprestimo, distribuirLucros,
   NIVEL_MAX_EQUIP, NIVEL_MAX_ESPACO,
   fecharMes, comparativoDoAno, podeTrocarRegime, trocarRegime, resolverEvento, dicas,
@@ -36,6 +36,8 @@ const ABAS = ['painel', 'producao', 'comercial', 'pessoas', 'financas', 'imposto
 
 function salvar() { salvarJogo({ S, aba }); }
 
+// Contratos valem ate antes do mes `ate`: o ultimo mes de contrato e ate - 1.
+function fimDe(ate) { const m = ate - 1; return `o fim de ${MESES[m % 12].toLowerCase()} do ano ${Math.floor(m / 12) + 1}`; }
 function anoMes(m) { return { ano: Math.floor(m / 12) + 1, mes: MESES[m % 12], mm: String(m % 12 + 1).padStart(2, '0') }; }
 function sinal(v) { return v < 0 ? 'neg' : v > 0 ? 'pos' : ''; }
 function esc(t) { return String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -50,6 +52,8 @@ function render() {
     return;
   }
   const seg = SEG(S), am = anoMes(S.mes), h = S.hist.at(-1);
+  // no modo margem, o preco da tela (previsao, dicas, margem) e o que o fechamento vai usar
+  if (S.dec.modoPreco === 'margem') S.dec.preco = precoPelaMargem(S);
   app.innerHTML = `
     <div class="topo">
       <div class="marca">${esc(S.nome)}<small>${seg.nome} · ${NOME_REGIME[S.regime]}${S.participacao < 1 ? ' · sua parte: ' + pct(S.participacao) : ''}</small></div>
@@ -100,9 +104,10 @@ function caixaPrevisto() {
 function textoPrevisao() {
   const seg = SEG(S), c = capacidades(S, S.dec.func), dem = Math.round(demandaEsperada(S));
   const plano = seg.estocavel ? Math.min(S.dec.producaoAuto ? planoProducaoAuto(S) : S.dec.producao, c.capacidade) : 0;
-  const oferta = (seg.estocavel ? plano + S.estoque : c.capacidade) - soma(S.pedidos, p => p.qtd);
-  const gargalo = c.cobertura < Math.min(dem, oferta) ? 'atendimento' : oferta < dem ? (seg.estocavel ? 'produção' : 'capacidade') : null;
-  const cap = seg.estocavel ? `produção <b>${num(plano)}</b> + estoque <b>${num(S.estoque)}</b>` : `capacidade <b>${num(c.capacidade)}</b>`;
+  const oferta = (seg.estocavel ? plano + S.estoque : c.capacidade) - soma(S.pedidos, p => p.qtd) - qtdContratoCliente(S);
+  const nomeProd = seg.revenda ? 'compras' : 'produção';
+  const gargalo = c.cobertura < Math.min(dem, oferta) ? 'atendimento' : oferta < dem ? (seg.estocavel ? nomeProd : 'capacidade') : null;
+  const cap = seg.estocavel ? `${nomeProd} <b>${num(plano)}</b> + estoque <b>${num(S.estoque)}</b>` : `capacidade <b>${num(c.capacidade)}</b>`;
   const cx = jogoEncerrado(S) ? null : caixaPrevisto();
   const caixa = cx === null ? '' : ` · caixa previsto <b class="${cx < 0 ? 'neg' : ''}">${brl(cx)}</b>`;
   return `Procura estimada <b>${num(dem)}</b> ${seg.unidades} · ${cap} · atendimento <b>${num(c.cobertura)}</b>${caixa}${gargalo ? ` <span class="chip alerta">gargalo: ${gargalo}</span>` : ''}${cx !== null && cx < 0 ? ' <span class="chip alerta">caixa negativo</span>' : ''}`;
@@ -168,8 +173,8 @@ function blocoCenario() {
   if (futura) itens.push(['aviso', `Recessão prevista a partir de ${MESES[futura.de % 12].toLowerCase()} do ano ${Math.floor(futura.de / 12) + 1}.`]);
   if (prod < 1) itens.push(['ruim', `Produção a ${pct(prod)} neste mês.`]);
   if (pm < 1) itens.push(['aviso', `Guerra de preços: o mercado aceita ${pct(1 - pm)} a menos.`]);
-  if (S.contratoFornecedor) itens.push(['', `Contrato com o fornecedor até ${MESES[S.contratoFornecedor.ate % 12].toLowerCase()} do ano ${Math.floor(S.contratoFornecedor.ate / 12) + 1}: custo travado, compra mínima de ${num(S.contratoFornecedor.minimo)} ${seg.unidades}/mês.`]);
-  if (S.contratoCliente) itens.push(['', `Contrato com a rede: ${num(S.contratoCliente.qtd)} ${seg.unidades}/mês a ${brl2(S.contratoCliente.preco)} até ${MESES[S.contratoCliente.ate % 12].toLowerCase()} do ano ${Math.floor(S.contratoCliente.ate / 12) + 1}.`]);
+  if (S.contratoFornecedor) itens.push(['', `Contrato com o fornecedor até ${fimDe(S.contratoFornecedor.ate)}: custo travado, compra mínima de ${num(S.contratoFornecedor.minimo)} ${seg.unidades}/mês.`]);
+  if (S.contratoCliente) itens.push(['', `Contrato com a rede: ${num(S.contratoCliente.qtd)} ${seg.unidades}/mês a ${brl2(S.contratoCliente.preco)} até ${fimDe(S.contratoCliente.ate)}.`]);
   if (S.fornecedorArriscado) itens.push(['', 'Fornecedor novo, mais barato: pode atrasar entregas.']);
   return `<div class="bloco"><h3>Cenário</h3>
     <div class="kpis">${kpi('Selic', pct(S.selic, 2))}${kpi('Economia', S.economia >= 1.05 ? 'aquecida' : S.economia <= 0.95 ? 'fraca' : 'normal')}${kpi('Concorrência', pct(S.concorrencia), S.concorrencia >= 0.15 ? 'neg' : '')}${kpi('Reajuste acumulado', pct(indice(S) - 1))}</div>
@@ -282,7 +287,7 @@ function abaProducao() {
           `${insumo}. O que não vender fica em estoque (armazenagem de 1,5% ao mês).${perda}`)}
     </div>` : sobDemanda}
     <div class="bloco"><header><h3>Fornecedor</h3>${S.contratoFornecedor ? '<span class="chip ok">contrato ativo</span>' : S.fornecedorArriscado ? '<span class="chip alerta">fornecedor novo</span>' : ''}</header>
-      <p class="ajuda">${insumo}. Sobe com a inflação (cerca de 0,4% ao mês) e com os reajustes do mercado.${S.contratoFornecedor ? ` Contrato até ${MESES[S.contratoFornecedor.ate % 12].toLowerCase()} do ano ${Math.floor(S.contratoFornecedor.ate / 12) + 1}: preço travado e compra mínima de ${num(S.contratoFornecedor.minimo)} ${seg.unidades} por mês (o que faltar paga 30% de multa). No fim, o custo volta ao preço de mercado de uma vez.` : ''}${S.fornecedorArriscado ? ' O fornecedor atual é mais barato, mas atrasa a entrega em cerca de 1 mês a cada 8.' : ''} Propostas de fornecedores chegam como acontecimentos.</p>
+      <p class="ajuda">${insumo}. Sobe com a inflação (cerca de 0,4% ao mês) e com os reajustes do mercado.${S.contratoFornecedor ? ` Contrato até ${fimDe(S.contratoFornecedor.ate)}: preço travado e compra mínima de ${num(S.contratoFornecedor.minimo)} ${seg.unidades} por mês (o que faltar paga 30% de multa). No fim, o custo volta ao preço de mercado de uma vez.` : ''}${S.fornecedorArriscado ? ' O fornecedor atual é mais barato, mas atrasa a entrega em cerca de 1 mês a cada 5.' : ''} Propostas de fornecedores chegam como acontecimentos.</p>
     </div>
     <div class="bloco"><header><h3>Equipamentos</h3><span class="chip ${S.equipNivel ? 'ok' : ''}">nível ${S.equipNivel} de ${NIVEL_MAX_EQUIP}</span></header>
       <p class="ajuda">Cada nível aumenta a produtividade em ${pct(seg.ganhoEquip)} e a qualidade em 3 pontos; do 6º em diante, a metade disso. O valor vai para o imobilizado e é depreciado em 10 anos.</p>
@@ -308,7 +313,6 @@ function abaComercial() {
   const seg = SEG(S), c = capacidades(S, S.dec.func);
   const { passo, min, max } = faixaPreco();
   const porMargem = S.dec.modoPreco === 'margem';
-  if (porMargem) S.dec.preco = precoPelaMargem(S);
   return `<div class="stack">
     <div class="bloco"><header><h3>Preço</h3><span class="chip">mercado: ${brl2(precoMercado(S))}</span></header>
       <div class="opcoes">
@@ -316,7 +320,7 @@ function abaComercial() {
         <label class="opcao"><input type="radio" name="modoPreco" value="margem" ${porMargem ? 'checked' : ''}><b>Definir pela margem</b><span>Você escolhe a margem de contribuição; o preço é recalculado todo mês com o custo do dia.</span></label>
       </div>
       ${porMargem
-        ? slider('margemAlvo', 'Margem de contribuição desejada', S.dec.margemAlvo, 0.05, 0.75, 0.01, v => pct(v), textoPreco())
+        ? slider('margemAlvo', 'Margem de contribuição desejada', Math.min(S.dec.margemAlvo, margemMaxima(S)), 0.05, margemMaxima(S), 0.01, v => pct(v), textoPreco())
         : slider('preco', `Preço por ${seg.unidade}`, clamp(S.dec.preco, min, max), min, max, passo, brl2, textoPreco())}
     </div>
     <div class="bloco" id="bloco-margem">${blocoMargem()}</div>
@@ -334,7 +338,7 @@ function abaComercial() {
         <label class="opcao"><input type="radio" name="prazo" value="1" ${S.dec.prazo ? 'checked' : ''}><b>Aceitar a prazo</b><span>+15% de procura, mas 60% da venda só entra no mês seguinte, e cliente a prazo às vezes não paga.</span></label>
       </div>
     </div>
-    ${S.contratoCliente ? `<div class="bloco"><header><h3>Contrato com a rede</h3><span class="chip ok">ativo</span></header><p class="ajuda">${num(S.contratoCliente.qtd)} ${seg.unidades} por mês a ${brl2(S.contratoCliente.preco)}, atendidos antes dos clientes normais, até ${MESES[S.contratoCliente.ate % 12].toLowerCase()} do ano ${Math.floor(S.contratoCliente.ate / 12) + 1}. O que faltar paga 30% do preço de multa.</p></div>` : ''}
+    ${S.contratoCliente ? `<div class="bloco"><header><h3>Contrato com a rede</h3><span class="chip ok">ativo</span></header><p class="ajuda">${num(S.contratoCliente.qtd)} ${seg.unidades} por mês a ${brl2(S.contratoCliente.preco)}, atendidos antes dos clientes normais, até ${fimDe(S.contratoCliente.ate)}. O que faltar paga 30% do preço de multa.</p></div>` : ''}
     <div class="bloco"><h3>Novos mercados</h3>
       ${seg.expansoes.map(e => S.expansoes.includes(e.id)
         ? `<div><b>${e.nome}</b> <span class="chip ok">ativo</span><p class="small muted">${e.desc}</p></div>`
@@ -460,7 +464,7 @@ function abaImpostos() {
   const { tot, melhor } = comparativoDoAno(S, anoAtual);
   const descr = {
     simples: seg.anexoFixo
-      ? `Guia única (DAS), Anexo ${seg.anexoFixo}: serviços contábeis ficam nele sem depender do Fator R.`
+      ? `Guia única (DAS), Anexo ${seg.anexoFixo}: serviços contábeis ficam nele sem depender do Fator R. Muitos municípios cobram do escritório um ISS fixo, fora do DAS (LC 123, art. 18 §22-A); o jogo considera uma cidade sem essa lei, com o ISS dentro do DAS.`
       : seg.tipo === 'servico' ? 'Guia única (DAS). Anexo III ou V conforme o Fator R.' : `Guia única (DAS), Anexo ${seg.tipo === 'comercio' ? 'I' : 'II'}. Limite de R$ 4,8 mi por ano.`,
     presumido: `IRPJ e CSLL sobre uma margem presumida de ${seg.tipo === 'servico' ? '32%' : '8% e 12%'}. PIS/COFINS cumulativos.`,
     real: seg.pisCofinsCumulativo
@@ -495,7 +499,7 @@ function abaImpostos() {
       </table></div>
       <p class="ajuda">Inclui a contribuição patronal sobre a folha, que muda de um regime para outro. Não inclui a diferença de honorários do contador. Todo janeiro o jogo abre a decisão do regime com este comparativo, já somando os honorários.</p>
     </div>` : '<div class="bloco"><p class="ajuda">Feche o primeiro mês para ver os tributos apurados e o comparativo entre regimes.</p></div>'}
-    <div class="bloco"><h3>Regras do jogo</h3><p class="ajuda">Alíquotas do Simples pelas tabelas da LC 123/2006 (Anexos I, II, III e V). Se a receita do ano passar do sublimite de R$ 3,6 milhões, ICMS e ISS saem do DAS e passam a ser pagos por fora: no ano seguinte, ou já no mês seguinte se passar de R$ 4,32 milhões. Na 6ª faixa (RBT12 acima de R$ 3,6 mi), enquanto a empresa não está impedida, ICMS e ISS seguem no DAS calculados pela 5ª faixa. Acima do limite de R$ 4,8 milhões no ano a empresa sai do Simples em janeiro, ou no mês seguinte se passar de R$ 5,76 milhões. PIS/COFINS da indústria sem o ICMS na base (Tema 69 do STF). ICMS, ISS e IRPJ/CSLL simplificados: apuração mensal, sem substituição tributária e sem IPI. A transição para IBS e CBS da reforma tributária ainda não está no jogo.</p></div>
+    <div class="bloco"><h3>Regras do jogo</h3><p class="ajuda">Alíquotas do Simples pelas tabelas da LC 123/2006 (Anexos I, II, III e V). Se a receita do ano passar do sublimite de R$ 3,6 milhões, ICMS e ISS saem do DAS e passam a ser pagos por fora: no ano seguinte, ou já no mês seguinte se passar de R$ 4,32 milhões. Na 6ª faixa (RBT12 acima de R$ 3,6 mi), enquanto a empresa não está impedida, ICMS e ISS seguem no DAS calculados pela 5ª faixa. Acima do limite de R$ 4,8 milhões no ano a empresa sai do Simples em janeiro, ou no mês seguinte se passar de R$ 5,76 milhões. PIS/COFINS da indústria sem o ICMS na base (Tema 69 do STF). ICMS, ISS e IRPJ/CSLL simplificados: apuração mensal, sem substituição tributária e sem IPI. Crédito de ICMS ou de PIS/COFINS maior que o débito vira saldo credor para os meses seguintes. No mercadinho, cesta básica e produtos monofásicos têm alíquota zero de PIS/COFINS na venda: só 40% da receita paga as contribuições (no Simples, sai do DAS a parcela delas sobre os outros 60%). A transição para IBS e CBS da reforma tributária ainda não está no jogo.</p></div>
   </div>`;
 }
 
@@ -518,7 +522,7 @@ function abaRelatorios() {
         ${linha('Receita bruta de vendas', x => x.receita, '', false)}
         ${linha('(−) Tributos sobre vendas', x => x.tribVenda)}
         ${linha('= Receita líquida', x => x.receita - x.tribVenda, 'total', false)}
-        ${linha(SEG(S).estocavel ? '(−) Custo dos produtos vendidos' : SEG(S).tipo === 'servico' ? '(−) Custo direto dos serviços' : '(−) Custo das mercadorias vendidas', x => x.cmv)}
+        ${linha(SEG(S).estocavel && !SEG(S).revenda ? '(−) Custo dos produtos vendidos' : SEG(S).tipo === 'servico' ? '(−) Custo direto dos serviços' : '(−) Custo das mercadorias vendidas', x => x.cmv)}
         ${linha('= Lucro bruto', x => x.receita - x.tribVenda - x.cmv, 'total', false)}
         ${linha('(−) Salários', x => x.folha)}
         ${linha('(−) Encargos sobre a folha', x => x.encargos)}
@@ -549,7 +553,7 @@ function abaRelatorios() {
         <tr class="total"><td>Caixa no fim do mês</td><td class="${sinal(h.caixa)}">${brl(h.caixa)}</td></tr>
       </table></div>
       ${h.financiado ? `<p class="ajuda">Equipamento financiado direto ao fornecedor: ${brl(h.financiado)}. Não passou pelo caixa: entrou no imobilizado e na dívida ao mesmo tempo.</p>` : ''}
-      <p class="ajuda">Lucro e caixa são coisas diferentes: venda a prazo vira lucro hoje e dinheiro depois; equipamento sai do caixa hoje e vira despesa aos poucos, pela depreciação.${SEG(S).estocavel ? ' Na confecção, o salário da fábrica entra no custo de cada peça e só vai para o resultado quando ela é vendida (custeio por absorção): a folha sai do caixa no mês, mas parte dela fica no estoque.' : ''}</p>
+      <p class="ajuda">Lucro e caixa são coisas diferentes: venda a prazo vira lucro hoje e dinheiro depois; equipamento sai do caixa hoje e vira despesa aos poucos, pela depreciação.${SEG(S).estocavel && !SEG(S).revenda ? ' Na confecção, o salário da fábrica entra no custo de cada peça e só vai para o resultado quando ela é vendida (custeio por absorção): a folha sai do caixa no mês, mas parte dela fica no estoque.' : ''}</p>
     </div>
     <div class="bloco"><h3>Histórico</h3>
       <div class="tab-wrap"><table>
@@ -606,6 +610,7 @@ function custoFixoInicial() {
 /* ---- modal ---- */
 function renderModal() {
   if (veu) { veu.remove(); veu = null; }
+  app.inert = !!modal;
   if (!modal) return;
   veu = document.createElement('div');
   veu.className = 'veu';
@@ -672,6 +677,7 @@ function fmtCampo(campo, v) {
 
 function aoDigitar(ev) {
   const t = ev.target;
+  if (modal && !t.closest('.veu')) return;
   if (t.id === 'nome-empresa') { setup.nome = t.value; return; }
   if (!S || !t.dataset.campo) return;
   const campo = t.dataset.campo;
@@ -699,6 +705,7 @@ function aoDigitar(ev) {
 
 function aoMudar(ev) {
   const t = ev.target;
+  if (modal && !t.closest('.veu')) return;
   // o slider grava quando o dedo solta (change), e nao a cada passo do arraste (input)
   if (S && t.type === 'range') { salvar(); return; }
   if (t.type !== 'radio') return;
@@ -713,7 +720,14 @@ function aoMudar(ev) {
   if (t.name === 'modoPreco') {
     S.dec.modoPreco = t.value;
     // ao ligar a margem, parte da margem do preco atual
-    if (t.value === 'margem' && S.dec.preco > 0) S.dec.margemAlvo = clamp(Math.round(margemContribuicao(S) / S.dec.preco * 100) / 100, 0.05, 0.75);
+    // ao ligar a margem, parte exatamente da margem do preco atual: o preco nao muda so por trocar o modo
+    // (nos servicos, 1 ponto de margem mexe ~10% no preco, entao nada de arredondar aqui)
+    if (t.value === 'margem' && S.dec.preco > 0) S.dec.margemAlvo = clamp(margemContribuicao(S) / S.dec.preco, 0.05, margemMaxima(S));
+    // ao voltar ao preco manual, o preco cai na grade do slider: o que se ve e o que se cobra
+    if (t.value === 'preco') {
+      const { passo, min, max } = faixaPreco();
+      S.dec.preco = clamp(Math.round(S.dec.preco / passo) * passo, min, max);
+    }
   }
   if (t.name === 'seguro') S.dec.seguro = t.value === '1';
   if (t.name === 'regime') trocarRegime(S, t.value);
@@ -724,6 +738,8 @@ function aoMudar(ev) {
 function aoClicar(ev) {
   const b = ev.target.closest('button');
   if (!b || b.disabled) return;
+  // com um modal aberto, so os botoes dele valem (o teclado alcanca a tela de tras)
+  if (modal && !b.closest('.veu')) return;
   if (b.dataset.aba) {
     aba = b.dataset.aba;
     pendente = null;

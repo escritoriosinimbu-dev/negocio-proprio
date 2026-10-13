@@ -58,11 +58,18 @@ describe('preco justo: qualidade e reputacao', () => {
 });
 
 describe('margem de contribuicao', () => {
-  it('o preco pela margem entrega a margem pedida', () => {
+  it('o preco pela margem entrega a margem pedida e fica na faixa do preco manual', () => {
     for (const segmento of Object.keys(SEGMENTOS)) {
       const s = jogo(segmento);
-      const p = precoPelaMargem(s, 0.35);
-      expect(margemContribuicao(s, p) / p).toBeCloseTo(0.35, 2);
+      // a margem que um preco 10% abaixo do mercado da: cai dentro da faixa
+      const m = margemContribuicao(s, s.precoRef * 0.9) / (s.precoRef * 0.9);
+      const p = precoPelaMargem(s, m);
+      expect(margemContribuicao(s, p) / p).toBeCloseTo(m, 2);
+      for (const pedida of [0.05, 0.35, 0.9]) {
+        const q = precoPelaMargem(s, pedida);
+        expect(q).toBeGreaterThanOrEqual(Math.floor(s.precoRef * 0.6 * 100) / 100);
+        expect(q).toBeLessThanOrEqual(Math.ceil(s.precoRef * 1.6 * 100) / 100);
+      }
     }
   });
 
@@ -212,7 +219,54 @@ describe('mercadinho (revenda)', () => {
   });
 });
 
+describe('creditos e revenda', () => {
+  it('credito de ICMS maior que o debito vira saldo e abate o mes seguinte', () => {
+    const s = jogo('mercadinho', { regime: 'real' });
+    s.dec.producaoAuto = false;
+    s.dec.producao = 4000; // compra muito para estoque
+    const h1 = fechar(s, 1);
+    expect(h1.det.find(d => d.nome.startsWith('ICMS')).valor).toBe(0);
+    const saldo = s.saldoCredor.real.icms;
+    expect(saldo).toBeGreaterThan(0);
+    s.dec.producao = 0;
+    const h2 = fechar(s, 1);
+    const debito = h2.receita * 0.12;
+    expect(h2.det.find(d => d.nome.startsWith('ICMS')).valor).toBeCloseTo(Math.max(0, debito - saldo), 4);
+  });
+
+  it('mercadinho: so 40% da receita paga PIS/COFINS, no Presumido e no Real', () => {
+    const op = { seg: SEGMENTOS.mercadinho, receita: 100000, compras: 0, cmv: 0, folha: 0, proLabore: 0, despesas: 0, aluguel: 0, utilidades: 0, depreciacao: 0, juros: 0, rbt12: 1.2e6, fatorR: 0 };
+    const pis = ap => ap.det.filter(d => /PIS|COFINS/.test(d.nome)).reduce((t, d) => t + d.valor, 0);
+    expect(pis(apurar('presumido', op, 0))).toBeCloseTo(100000 * 0.88 * 0.4 * 0.0365, 4);
+    expect(pis(apurar('real', op, 0))).toBeCloseTo(100000 * 0.88 * 0.4 * 0.0925, 4);
+  });
+
+  it('o saldo de ICMS segue a empresa quando ela troca de regime', () => {
+    const s = jogo('mercadinho', { regime: 'real', mes: 12 });
+    s.saldoCredor = { real: { icms: 5000, pis: 300, cofins: 900 } };
+    resolverEvento(Object.assign(s, { evento: eventoRegime(s) }), eventoRegime(s).dados.ordem.indexOf('presumido'));
+    expect(s.saldoCredor.presumido).toEqual({ icms: 5000, pis: 0, cofins: 0 });
+  });
+});
+
 describe('fornecedores e contratos', () => {
+  it('o fornecedor mais barato aparece uma vez por partida', () => {
+    const s = jogo('mercadinho');
+    s.mes = 5;
+    expect(EVENTOS.fornecedorNovo.cond(s)).toBe(true);
+    viver(s, EVENTOS, 'fornecedorNovo', 1);
+    expect(EVENTOS.fornecedorNovo.cond(s)).toBe(false);
+  });
+
+  it('trocar o fornecedor barato devolve o preco de mercado', () => {
+    const s = jogo('mercadinho');
+    s.mes = 5;
+    const mercado = s.custoMat;
+    viver(s, EVENTOS, 'fornecedorNovo', 0);
+    viver(s, EVENTOS, 'negociacao', 2);
+    expect(s.custoMat).toBeCloseTo(mercado, 8);
+  });
+
   it('com contrato, o custo fica travado e o reajuste acumulado chega no fim', () => {
     const s = jogo('confeccao');
     fechar(s, 4);
@@ -224,7 +278,8 @@ describe('fornecedores e contratos', () => {
     s.contratoFornecedor.minimo = 0;
     fechar(s, 12);
     expect(s.contratoFornecedor).toBe(null);
-    expect(s.custoMat).toBeGreaterThan(travado * 1.15 * 1.04);
+    // volta ao de mercado: sem o desconto de 6%, com o choque de 15% e 12 meses de inflacao
+    expect(s.custoMat).toBeCloseTo(travado / 0.94 * 1.15 * Math.pow(1.004, 12), 6);
   });
 
   it('comprar abaixo do minimo do contrato gera multa', () => {
