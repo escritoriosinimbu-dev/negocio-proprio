@@ -27,7 +27,7 @@ export const SEGMENTOS = {
   confeccao: {
     nome: 'Confecção', tipo: 'industria', unidade: 'camiseta', unidades: 'camisetas',
     desc: 'Fábrica de camisetas. Pode produzir para estoque e vender depois — o Natal agradece.',
-    precoRef: 59, custoMat: 23, prodPorFunc: 380, mercado: 2300, elasticidade: 3, estocavel: true,
+    precoRef: 59, custoMat: 23, prodPorFunc: 380, mercado: 2200, elasticidade: 3, estocavel: true,
     aluguel: 4000, salProd: 2100, salCom: 2400, salAdm: 2700, capVenda: 600, capDono: 400,
     mkEscala: 3500, qEscala: 2500, setup: 55000, equipCusto: 35000, ganhoEquip: 0.2,
     icms: { aliq: 0.18, credito: true, nome: 'ICMS (débito − crédito)' }, iss: 0,

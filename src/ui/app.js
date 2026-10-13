@@ -6,6 +6,8 @@ import {
   dividaTotal, totalReceber, patrimonio, valorEmpresa, limiteCredito, taxaCapitalGiro, limiteCheque,
   riquezaDono, lucroDisponivel, notaFinal, multiploNota, CAPITAL_REFERENCIA, politicaPermitida, planoProducaoAuto,
   migrarEstado, liquidoProLabore, irrfDaDistribuicao, jogoEncerrado,
+  precoJusto, precoMercado, margemContribuicao, precoPelaMargem, pontoEquilibrio, custosFixos, aliqVendaEstimada,
+  custoInsumoUnit, DESPESA_VARIAVEL, premioSeguro, indice, aluguelMes, CONCORRENCIA_MAX, efeito,
   custoEquip, custoEspaco, comprar, contratarEmprestimo, quitarEmprestimo, distribuirLucros,
   NIVEL_MAX_EQUIP, NIVEL_MAX_ESPACO,
   fecharMes, comparativoDoAno, podeTrocarRegime, trocarRegime, resolverEvento, dicas,
@@ -148,6 +150,7 @@ function abaPainel() {
     <div class="kpis">${kpi('Nota se acabasse hoje', notaFinal(S))}${kpi('Múltiplo', fmtMultiplo(multiploNota(S)))}${kpi('Valor da empresa', brlK(valorEmpresa(S)))}${kpi('Meses restantes', S.modoLivre ? '—' : Math.max(0, DURACAO - S.mes))}</div>
     <p class="ajuda">Régua da nota: ${REGUA}.</p>
     ${blocoDicas()}
+    ${blocoCenario()}
     <div class="bloco"><h3>Acontecimentos de ${MESES[h.mes % 12].toLowerCase()}</h3>${listaNoticias(h.noticias)}</div>
     ${reiniciar}
   </div>`;
@@ -155,6 +158,25 @@ function abaPainel() {
 
 // truncado para baixo: o numero mostrado nunca alcanca um corte de nota que o jogador nao alcancou
 function fmtMultiplo(m) { return (Math.floor(m * 10) / 10).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '×'; }
+
+// Cenario externo: juros, economia, concorrencia, crises em curso e contratos.
+function blocoCenario() {
+  const seg = SEG(S), itens = [];
+  const dem = efeito(S, 'demanda'), prod = efeito(S, 'producao'), pm = efeito(S, 'precoMercado');
+  if (dem < 1) itens.push(['ruim', `Procura a ${pct(dem)} do normal neste mês (crise ou obra em curso).`]);
+  const futura = S.efeitos.find(e => e.tipo === 'demanda' && (e.de ?? -1) > S.mes);
+  if (futura) itens.push(['aviso', `Recessão prevista a partir de ${MESES[futura.de % 12].toLowerCase()} do ano ${Math.floor(futura.de / 12) + 1}.`]);
+  if (prod < 1) itens.push(['ruim', `Produção a ${pct(prod)} neste mês.`]);
+  if (pm < 1) itens.push(['aviso', `Guerra de preços: o mercado aceita ${pct(1 - pm)} a menos.`]);
+  if (S.contratoFornecedor) itens.push(['', `Contrato com o fornecedor até ${MESES[S.contratoFornecedor.ate % 12].toLowerCase()} do ano ${Math.floor(S.contratoFornecedor.ate / 12) + 1}: custo travado, compra mínima de ${num(S.contratoFornecedor.minimo)} ${seg.unidades}/mês.`]);
+  if (S.contratoCliente) itens.push(['', `Contrato com a rede: ${num(S.contratoCliente.qtd)} ${seg.unidades}/mês a ${brl2(S.contratoCliente.preco)} até ${MESES[S.contratoCliente.ate % 12].toLowerCase()} do ano ${Math.floor(S.contratoCliente.ate / 12) + 1}.`]);
+  if (S.fornecedorArriscado) itens.push(['', 'Fornecedor novo, mais barato: pode atrasar entregas.']);
+  return `<div class="bloco"><h3>Cenário</h3>
+    <div class="kpis">${kpi('Selic', pct(S.selic, 2))}${kpi('Economia', S.economia >= 1.05 ? 'aquecida' : S.economia <= 0.95 ? 'fraca' : 'normal')}${kpi('Concorrência', pct(S.concorrencia), S.concorrencia >= 0.15 ? 'neg' : '')}${kpi('Reajuste acumulado', pct(indice(S) - 1))}</div>
+    ${itens.length ? listaNoticias(itens) : ''}
+    <p class="ajuda">A Selic muda o custo dos empréstimos pós-fixados e o ânimo do consumidor. Concorrência é a fatia da procura que outras empresas levam: lucro alto atrai gente nova.</p>
+  </div>`;
+}
 
 function kpi(r, v, cls = '') { return `<div class="kpi"><div class="rot">${r}</div><div class="v ${cls}">${v}</div></div>`; }
 
@@ -217,7 +239,7 @@ function slider(campo, rotulo, valor, min, max, step, fmt, ajuda = '') {
 }
 
 function linhaFunc(setor, titulo, cargo) {
-  const seg = SEG(S), alvo = S.dec.func[setor], atual = S.func[setor], sal = salario(seg, setor, S.dec.politica);
+  const seg = SEG(S), alvo = S.dec.func[setor], atual = S.func[setor], sal = salario(seg, setor, S.dec.politica, indice(S));
   const delta = alvo - atual;
   return `<div class="linha-func"><div class="info"><b>${titulo}</b>
       <div class="small muted">${cargo} · salário ${brl(sal)} + encargos</div>
@@ -232,50 +254,75 @@ function botaoCompra(id, rotulo, custo) {
 }
 
 /* ---- Producao ---- */
+const maiuscula = x => x.charAt(0).toUpperCase() + x.slice(1);
+
 function abaProducao() {
   const seg = SEG(S), c = capacidades(S, S.dec.func);
+  const insumo = `${maiuscula(seg.insumo)}: ${brl2(S.custoMat)} por ${seg.unidade}`;
+  const planoNome = seg.planoNome || 'Plano de produção';
+  const verbo = seg.revenda ? 'Comprar' : 'Produzir';
+  const perda = seg.perecivel ? ` Todo mês ${pct(seg.perecivel)} do estoque se perde (validade e avaria).` : '';
+  let sobDemanda;
+  if (seg.recorrente) sobDemanda = `<div class="bloco"><h3>Carteira de clientes</h3><p class="ajuda">A equipe atende até ${num(c.capacidade)} ${seg.unidades} por mês; hoje a carteira tem ${num(S.carteira)}. Cliente atendido fica: a carteira cresce e encolhe devagar, cerca de 30% do caminho por mês até a procura do mercado. Cliente que não cabe na equipe vai embora. Custo direto de ${brl2(S.custoMat)} por cliente (${seg.insumo}).</p></div>`;
+  else if (seg.tipo === 'servico') sobDemanda = `<div class="bloco"><h3>Produção sob demanda</h3><p class="ajuda">Serviço não se estoca: a equipe entrega até ${num(c.capacidade)} ${seg.unidades} por mês. Custo direto de ${brl2(S.custoMat)} por ${seg.unidade} (${seg.insumo}).</p></div>`;
+  else sobDemanda = `<div class="bloco"><h3>Produção sob demanda</h3><p class="ajuda">A cozinha prepara conforme o pedido, até ${num(c.capacidade)} ${seg.unidades} por mês. ${insumo}, mais 6% de desperdício.</p></div>`;
   return `<div class="stack">
     <div class="bloco"><header><h3>Equipe de ${seg.setorProd.toLowerCase()}</h3><span class="chip">capacidade ${num(c.capacidade)} ${seg.unidades}/mês</span></header>
       ${linhaFunc('producao', seg.setorProd, seg.cargoProd)}
-      <p class="ajuda">Cada ${seg.cargoProd} faz cerca de ${num(seg.prodPorFunc)} ${seg.unidades} por mês. Moral, equipamento, espaço e organização mudam esse número.</p>
+      <p class="ajuda">Cada ${seg.cargoProd} dá conta de cerca de ${num(seg.prodPorFunc)} ${seg.unidades} por mês. Moral, equipamento, espaço e organização mudam esse número.</p>
     </div>
-    ${seg.estocavel ? `<div class="bloco"><header><h3>Plano de produção</h3><span class="chip">estoque: ${num(S.estoque)}</span></header>
+    ${seg.estocavel ? `<div class="bloco"><header><h3>${planoNome}</h3><span class="chip">estoque: ${num(S.estoque)}</span></header>
       <div class="opcoes">
-        <label class="opcao"><input type="radio" name="producaoAuto" value="1" ${S.dec.producaoAuto ? 'checked' : ''}><b>Automático</b><span>Produz a procura prevista + 5%, descontado o estoque.</span></label>
+        <label class="opcao"><input type="radio" name="producaoAuto" value="1" ${S.dec.producaoAuto ? 'checked' : ''}><b>Automático</b><span>${verbo} a procura prevista + 5%, descontado o estoque.</span></label>
         <label class="opcao"><input type="radio" name="producaoAuto" value="0" ${!S.dec.producaoAuto ? 'checked' : ''}><b>Manual</b><span>Você decide. Útil para formar estoque antes do Natal.</span></label>
       </div>
       ${S.dec.producaoAuto
-        ? `<p class="ajuda">Plano deste mês: cerca de ${num(Math.min(c.capacidade, planoProducaoAuto(S)))} ${seg.unidades} (capacidade ${num(c.capacidade)}). Matéria-prima: ${brl2(S.custoMat)} por ${seg.unidade}.</p>`
-        : slider('producao', 'Produzir neste mês', Math.min(S.dec.producao, c.capacidade), 0, Math.max(c.capacidade, 1), 10, v => num(v) + ' ' + seg.unidades,
-          `Matéria-prima: ${brl2(S.custoMat)} por ${seg.unidade}. O que não vender fica em estoque (armazenagem de 1,5% ao mês).`)}
-    </div>` : `<div class="bloco"><h3>Produção sob demanda</h3><p class="ajuda">${seg.tipo === 'servico'
-        ? `Serviço não se estoca: a equipe entrega até ${num(c.capacidade)} horas por mês. Custo direto de ${brl2(S.custoMat)} por hora (ferramentas e servidores).`
-        : `A cozinha prepara conforme o pedido, até ${num(c.capacidade)} refeições por mês. Insumos: ${brl2(S.custoMat)} por refeição, mais 6% de desperdício.`}</p></div>`}
+        ? `<p class="ajuda">Plano deste mês: cerca de ${num(Math.min(c.capacidade, planoProducaoAuto(S)))} ${seg.unidades} (capacidade ${num(c.capacidade)}). ${insumo}.${perda}</p>`
+        : slider('producao', `${verbo} neste mês`, Math.min(S.dec.producao, c.capacidade), 0, Math.max(c.capacidade, 1), 10, v => num(v) + ' ' + seg.unidades,
+          `${insumo}. O que não vender fica em estoque (armazenagem de 1,5% ao mês).${perda}`)}
+    </div>` : sobDemanda}
+    <div class="bloco"><header><h3>Fornecedor</h3>${S.contratoFornecedor ? '<span class="chip ok">contrato ativo</span>' : S.fornecedorArriscado ? '<span class="chip alerta">fornecedor novo</span>' : ''}</header>
+      <p class="ajuda">${insumo}. Sobe com a inflação (cerca de 0,4% ao mês) e com os reajustes do mercado.${S.contratoFornecedor ? ` Contrato até ${MESES[S.contratoFornecedor.ate % 12].toLowerCase()} do ano ${Math.floor(S.contratoFornecedor.ate / 12) + 1}: preço travado e compra mínima de ${num(S.contratoFornecedor.minimo)} ${seg.unidades} por mês (o que faltar paga 30% de multa). No fim, o custo volta ao preço de mercado de uma vez.` : ''}${S.fornecedorArriscado ? ' O fornecedor atual é mais barato, mas atrasa a entrega em cerca de 1 mês a cada 8.' : ''} Propostas de fornecedores chegam como acontecimentos.</p>
+    </div>
     <div class="bloco"><header><h3>Equipamentos</h3><span class="chip ${S.equipNivel ? 'ok' : ''}">nível ${S.equipNivel} de ${NIVEL_MAX_EQUIP}</span></header>
-      <p class="ajuda">Cada nível aumenta a produtividade em ${pct(seg.ganhoEquip)} e a qualidade em 3 pontos. O valor vai para o imobilizado e é depreciado em 10 anos.</p>
+      <p class="ajuda">Cada nível aumenta a produtividade em ${pct(seg.ganhoEquip)} e a qualidade em 3 pontos; do 6º em diante, a metade disso. O valor vai para o imobilizado e é depreciado em 10 anos.</p>
       ${S.equipNivel < NIVEL_MAX_EQUIP ? botaoCompra('equip', 'Comprar nível ' + (S.equipNivel + 1), custoEquip(S)) : '<p class="small muted">Nível máximo.</p>'}
     </div>
     <div class="bloco"><header><h3>Instalações</h3><span class="chip ${c.apertado ? 'alerta' : ''}">${c.total} de ${c.capEspaco} pessoas</span></header>
-      <p class="ajuda">Aluguel atual: ${brl(seg.aluguel * (1 + 0.7 * S.espacoNivel) + S.aluguelExtra)}/mês. Ampliar abre vaga para mais 10 pessoas e aumenta o aluguel em ${brl(seg.aluguel * 0.7)}. Gente demais no espaço derruba a produtividade em 15%.</p>
+      <p class="ajuda">Aluguel atual: ${brl(aluguelMes(S))}/mês. Ampliar abre vaga para mais 10 pessoas e aumenta o aluguel em ${brl(seg.aluguel * 0.7 * indice(S))}. Gente demais no espaço derruba a produtividade em 15%.</p>
       ${S.espacoNivel < NIVEL_MAX_ESPACO ? botaoCompra('espaco', 'Ampliar', custoEspaco(S)) : '<p class="small muted">Tamanho máximo.</p>'}
     </div>
     <div class="bloco"><header><h3>Qualidade</h3><span class="chip">qualidade ${Math.round(S.Q)}</span></header>
-      ${slider('qualidade', 'Investimento mensal em qualidade', S.dec.qualidade, 0, seg.qEscala * 3, 100, brl, 'Treinamento, controle de qualidade e insumos melhores. Qualidade alta aumenta a procura e a reputação; baixa gera reclamações.')}
+      ${slider('qualidade', 'Investimento mensal em qualidade', S.dec.qualidade, 0, seg.qEscala * 3, 100, brl, 'Treinamento, controle e insumos melhores. Qualidade alta aumenta o preço que o cliente aceita pagar e a reputação; baixa gera reclamações.')}
     </div>
   </div>`;
 }
 
 /* ---- Comercial ---- */
+function faixaPreco() {
+  const seg = SEG(S), ref = S.precoRef, passo = seg.precoRef >= 100 ? 1 : 0.5;
+  return { passo, min: Math.ceil(ref * 0.6 / passo) * passo, max: Math.floor(ref * 1.6 / passo) * passo };
+}
+
 function abaComercial() {
-  const seg = SEG(S), c = capacidades(S, S.dec.func), ref = S.precoRef;
-  const passo = seg.precoRef >= 100 ? 1 : 0.5;
-  const min = Math.ceil(ref * 0.6 / passo) * passo, max = Math.floor(ref * 1.6 / passo) * passo;
+  const seg = SEG(S), c = capacidades(S, S.dec.func);
+  const { passo, min, max } = faixaPreco();
+  const porMargem = S.dec.modoPreco === 'margem';
+  if (porMargem) S.dec.preco = precoPelaMargem(S);
   return `<div class="stack">
-    <div class="bloco"><header><h3>Preço</h3><span class="chip">mercado: ${brl2(ref)}</span></header>
-      ${slider('preco', `Preço por ${seg.unidade}`, clamp(S.dec.preco, min, max), min, max, passo, brl2, textoPreco())}
+    <div class="bloco"><header><h3>Preço</h3><span class="chip">mercado: ${brl2(precoMercado(S))}</span></header>
+      <div class="opcoes">
+        <label class="opcao"><input type="radio" name="modoPreco" value="preco" ${!porMargem ? 'checked' : ''}><b>Definir o preço</b><span>Você escolhe o valor. Custos que sobem comem a margem até você reajustar.</span></label>
+        <label class="opcao"><input type="radio" name="modoPreco" value="margem" ${porMargem ? 'checked' : ''}><b>Definir pela margem</b><span>Você escolhe a margem de contribuição; o preço é recalculado todo mês com o custo do dia.</span></label>
+      </div>
+      ${porMargem
+        ? slider('margemAlvo', 'Margem de contribuição desejada', S.dec.margemAlvo, 0.05, 0.75, 0.01, v => pct(v), textoPreco())
+        : slider('preco', `Preço por ${seg.unidade}`, clamp(S.dec.preco, min, max), min, max, passo, brl2, textoPreco())}
     </div>
+    <div class="bloco" id="bloco-margem">${blocoMargem()}</div>
     <div class="bloco"><header><h3>Marketing</h3><span class="chip">reputação ${Math.round(S.A)}</span></header>
-      ${slider('marketing', 'Verba mensal de marketing', S.dec.marketing, 0, seg.mkEscala * 4, 100, brl, 'A reputação sobe aos poucos, e cada real a mais rende menos que o anterior. Cortar a verba faz a marca ser esquecida.')}
+      ${slider('marketing', 'Verba mensal de marketing', S.dec.marketing, 0, seg.mkEscala * 4, 100, brl, 'A reputação sobe aos poucos, e cada real a mais rende menos que o anterior. Ela decide quanta gente conhece a marca e quanto aceita pagar. Cortar a verba faz a marca ser esquecida.')}
+      ${S.concorrencia >= 0.01 ? `<p class="small ${S.concorrencia >= 0.15 ? 'war' : 'muted'}">Concorrentes levam ${pct(S.concorrencia)} da sua procura. Eles chegam atraídos pelo lucro e vão embora aos poucos.</p>` : ''}
     </div>
     <div class="bloco"><header><h3>${seg.setorCom}</h3><span class="chip">atendimento ${num(c.cobertura)} ${seg.unidades}/mês</span></header>
       ${linhaFunc('comercial', seg.setorCom, seg.cargoCom)}
@@ -284,9 +331,10 @@ function abaComercial() {
     <div class="bloco"><h3>Condição de pagamento</h3>
       <div class="opcoes">
         <label class="opcao"><input type="radio" name="prazo" value="0" ${!S.dec.prazo ? 'checked' : ''}><b>Só à vista</b><span>Dinheiro entra no mês da venda.</span></label>
-        <label class="opcao"><input type="radio" name="prazo" value="1" ${S.dec.prazo ? 'checked' : ''}><b>Aceitar a prazo</b><span>+15% de procura, mas 60% da venda só entra no mês seguinte.</span></label>
+        <label class="opcao"><input type="radio" name="prazo" value="1" ${S.dec.prazo ? 'checked' : ''}><b>Aceitar a prazo</b><span>+15% de procura, mas 60% da venda só entra no mês seguinte, e cliente a prazo às vezes não paga.</span></label>
       </div>
     </div>
+    ${S.contratoCliente ? `<div class="bloco"><header><h3>Contrato com a rede</h3><span class="chip ok">ativo</span></header><p class="ajuda">${num(S.contratoCliente.qtd)} ${seg.unidades} por mês a ${brl2(S.contratoCliente.preco)}, atendidos antes dos clientes normais, até ${MESES[S.contratoCliente.ate % 12].toLowerCase()} do ano ${Math.floor(S.contratoCliente.ate / 12) + 1}. O que faltar paga 30% do preço de multa.</p></div>` : ''}
     <div class="bloco"><h3>Novos mercados</h3>
       ${seg.expansoes.map(e => S.expansoes.includes(e.id)
         ? `<div><b>${e.nome}</b> <span class="chip ok">ativo</span><p class="small muted">${e.desc}</p></div>`
@@ -296,10 +344,30 @@ function abaComercial() {
 }
 
 function textoPreco() {
-  const seg = SEG(S), p = S.dec.preco;
-  const custo = S.custoMat * (seg.tipo === 'comercio' ? 1.06 : 1);
-  const margem = (p - custo) / p;
-  return `Margem sobre o custo direto: ${pct(margem)}. Preço ${p > S.precoRef ? 'acima' : p < S.precoRef ? 'abaixo' : 'igual'} do mercado: procura ${pct(Math.pow(S.precoRef / p, seg.elasticidade))} da normal.`;
+  const seg = SEG(S), p = S.dec.preco, justo = precoJusto(S);
+  const procura = Math.pow(justo / p, seg.elasticidade);
+  const prefixo = S.dec.modoPreco === 'margem' ? `Preço resultante: ${brl2(p)}. ` : '';
+  return `${prefixo}Preço justo para a sua qualidade e reputação: ${brl2(justo)}. Com ${brl2(p)}, a procura fica em ${pct(procura)} da que você teria cobrando o justo.`;
+}
+
+// Margem de contribuicao e ponto de equilibrio com as decisoes atuais.
+function blocoMargem() {
+  const seg = SEG(S), p = S.dec.preco, aliq = aliqVendaEstimada(S);
+  const insumo = custoInsumoUnit(S), trib = p * aliq, varia = p * DESPESA_VARIAVEL;
+  const mc = margemContribuicao(S), fixos = custosFixos(S), pe = pontoEquilibrio(S);
+  const dem = Math.round(demandaEsperada(S));
+  return `<header><h3>Margem e ponto de equilíbrio</h3><span class="chip ${mc <= 0 ? 'alerta' : ''}">margem ${p > 0 ? pct(mc / p) : '—'}</span></header>
+    <div class="tab-wrap"><table>
+      <tr><td>Preço por ${seg.unidade}</td><td>${brl2(p)}</td></tr>
+      <tr><td>(−) ${maiuscula(seg.insumo)}${seg.perecivel ? ', com a perda de estoque' : seg.tipo === 'comercio' && !seg.estocavel ? ', com 6% de desperdício' : ''}</td><td>${brl2(-insumo)}</td></tr>
+      <tr><td>(−) Tributos sobre a venda (${pct(aliq, 1)}${S.hist.length ? ', do último mês' : ', estimado'})</td><td>${brl2(-trib)}</td></tr>
+      <tr><td>(−) Despesas variáveis (energia, taxas de cartão: ${pct(DESPESA_VARIAVEL, 1)})</td><td>${brl2(-varia)}</td></tr>
+      <tr class="total"><td>= Margem de contribuição</td><td class="${sinal(mc)}">${brl2(mc)}</td></tr>
+      <tr><td>Custos fixos do mês (folha, aluguel, marketing, contador…)</td><td>${brl(fixos)}</td></tr>
+      <tr class="total"><td>Ponto de equilíbrio</td><td>${Number.isFinite(pe) ? num(pe) + ' ' + seg.unidades : 'não há'}</td></tr>
+      <tr class="sub"><td>Procura estimada para este mês</td><td>${num(dem)} ${seg.unidades}</td></tr>
+    </table></div>
+    <p class="ajuda">Margem de contribuição é o que cada venda deixa para pagar os custos fixos. Abaixo do ponto de equilíbrio, o mês fecha no vermelho; acima dele, cada venda a mais vira lucro.</p>`;
 }
 
 /* ---- Pessoas ---- */
@@ -344,15 +412,22 @@ function abaFinancas() {
         <tr class="total"><td>Patrimônio líquido</td><td class="${sinal(patrimonio(S))}">${brl(patrimonio(S))}</td></tr>
       </table></div>
     </div>
-    <div class="bloco"><header><h3>Empréstimos</h3><span class="chip">limite disponível ${brl(lim)}</span></header>
+    <div class="bloco"><header><h3>Empréstimos</h3><span class="chip">Selic ${pct(S.selic, 2)} a.a.</span></header>
       ${S.emprestimos.length ? `<div class="tab-wrap"><table><tr><th>Linha</th><th>Saldo</th><th>Juros</th><th>Parcela</th><th></th></tr>
-        ${S.emprestimos.map((e, i) => `<tr><td>${e.nome}</td><td>${brl(e.saldo)}</td><td>${pct(e.taxa, 1)} a.m.</td><td>${brl(e.amort + e.saldo * e.taxa)}</td>
+        ${S.emprestimos.map((e, i) => `<tr><td>${e.nome}</td><td>${brl(e.saldo)}</td><td>${pct(e.taxa, 2)} a.m.${e.posFixado ? ' <span class="chip">pós</span>' : ''}</td><td>${brl(e.amort + e.saldo * e.taxa)}</td>
           <td><button class="btn" data-acao="quitar" data-i="${i}" ${S.caixa < e.saldo ? 'disabled' : ''}>Quitar</button></td></tr>`).join('')}</table></div>`
         : '<p class="small muted">Nenhum empréstimo.</p>'}
-      ${lim >= 5000 ? `${slider('emprestimo', `Capital de giro (${pct(taxa, 1)} ao mês, 24 meses)`, S.dec.emprestimo, 0, lim, 1000, brl)}
+      <p class="small muted">Limite disponível: ${brl(lim)}.</p>
+      ${lim >= 5000 ? `${slider('emprestimo', `Capital de giro (${pct(taxa, 2)} ao mês prefixado, 24 meses)`, S.dec.emprestimo, 0, lim, 1000, brl)}
         <div class="row"><button class="btn prim" data-acao="emprestar" ${S.dec.emprestimo < 1000 ? 'disabled' : ''}>Contratar ${brl(S.dec.emprestimo)}</button></div>`
         : '<p class="small muted">Sem limite de crédito no momento.</p>'}
-      <p class="ajuda">Se o caixa fechar o mês negativo, o banco cobre com cheque especial a 8% ao mês. Limite do cheque especial: ${brl(limiteCheque(S))}.</p>
+      <p class="ajuda">O capital de giro é prefixado: a taxa do dia da contratação (Selic + spread do banco) vale até o fim. O Pronampe é pós-fixado (Selic + 6% ao ano): a parcela de juros muda quando o Copom mexe na Selic. Se o caixa fechar o mês negativo, o banco cobre com cheque especial a 8% ao mês. Limite do cheque especial: ${brl(limiteCheque(S))}.</p>
+    </div>
+    <div class="bloco"><header><h3>Seguro empresarial</h3>${S.dec.seguro ? '<span class="chip ok">ativo</span>' : ''}</header>
+      <div class="opcoes">
+        <label class="opcao"><input type="radio" name="seguro" value="0" ${!S.dec.seguro ? 'checked' : ''}><b>Sem seguro</b><span>Enchente e quebra de equipamento saem inteiras do caixa.</span></label>
+        <label class="opcao"><input type="radio" name="seguro" value="1" ${S.dec.seguro ? 'checked' : ''}><b>Com seguro (${brl(premioSeguro(S))}/mês)</b><span>Cobre 80% de enchente e quebra de equipamento. O prêmio acompanha o valor do imobilizado e do estoque.</span></label>
+      </div>
     </div>
     <div class="bloco"><h3>Remuneração do sócio</h3>
       ${slider('proLabore', 'Pró-labore mensal', S.dec.proLabore, 1600, 30000, 100, brl, textoProLabore())}
@@ -384,7 +459,9 @@ function abaImpostos() {
   const anoAtual = h ? Math.floor(h.mes / 12) : 0;
   const { tot, melhor } = comparativoDoAno(S, anoAtual);
   const descr = {
-    simples: seg.tipo === 'servico' ? 'Guia única (DAS). Anexo III ou V conforme o Fator R.' : `Guia única (DAS), Anexo ${seg.tipo === 'comercio' ? 'I' : 'II'}. Limite de R$ 4,8 mi por ano.`,
+    simples: seg.anexoFixo
+      ? `Guia única (DAS), Anexo ${seg.anexoFixo}: serviços contábeis ficam nele sem depender do Fator R.`
+      : seg.tipo === 'servico' ? 'Guia única (DAS). Anexo III ou V conforme o Fator R.' : `Guia única (DAS), Anexo ${seg.tipo === 'comercio' ? 'I' : 'II'}. Limite de R$ 4,8 mi por ano.`,
     presumido: `IRPJ e CSLL sobre uma margem presumida de ${seg.tipo === 'servico' ? '32%' : '8% e 12%'}. PIS/COFINS cumulativos.`,
     real: seg.pisCofinsCumulativo
       ? 'IRPJ e CSLL sobre o lucro de verdade. Desenvolvimento de software fica no PIS/COFINS cumulativo (3,65%) mesmo no Real. Contabilidade mais cara.'
@@ -395,7 +472,7 @@ function abaImpostos() {
       <div class="opcoes">${REGIMES.map(r => {
         const bloqueado = !janeiro || (r === 'simples' && S.excluidoSimples);
         return `<label class="opcao"><input type="radio" name="regime" value="${r}" ${S.regime === r ? 'checked' : ''} ${bloqueado ? 'disabled' : ''}>
-          <b>${NOME_REGIME[r]}</b><span>${descr[r]} Contador: ${brl(HONORARIOS[r])}/mês.</span></label>`;
+          <b>${NOME_REGIME[r]}</b><span>${descr[r]} Contador: ${brl(HONORARIOS[r] * indice(S))}/mês.</span></label>`;
       }).join('')}</div>
       ${S.excluidoSimples ? '<p class="small war">A receita do ano passou do limite de R$ 4,8 milhões: o Simples fica fechado até um janeiro depois de um ano dentro do limite.</p>' : ''}
     </div>
@@ -407,7 +484,7 @@ function abaImpostos() {
       </table></div>
       <div class="kpis">${kpi('RBT12', brlK(h.rbt12))}${kpi('Fator R', pct(h.fatorR))}${kpi('Anexo', h.anexo || '—')}${kpi('Prejuízo fiscal a compensar', brl(S.prejuizoFiscal || 0))}</div>
       <p class="ajuda">RBT12 é a receita dos 12 meses anteriores e define a faixa (alíquota) do Simples. No 1º mês usa-se a receita do próprio mês × 12; do 2º ao 12º, a média dos meses anteriores × 12. O limite de R$ 4,8 milhões e o sublimite de R$ 3,6 milhões se medem pela receita do ano (janeiro a dezembro), que até agora soma ${brlK(soma(S.hist.filter(x => Math.floor(x.mes / 12) === anoAtual), x => x.receita))}.</p>
-      <p class="ajuda">Fator R = salários, 13º, férias, FGTS e pró-labore dos 12 meses anteriores ÷ RBT12. Com 28% ou mais, o serviço vai para o Anexo III; abaixo, para o Anexo V.</p>
+      ${seg.tipo === 'servico' && !seg.anexoFixo ? '<p class="ajuda">Fator R = salários, 13º, férias, FGTS e pró-labore dos 12 meses anteriores ÷ RBT12. Com 28% ou mais, o serviço vai para o Anexo III; abaixo, para o Anexo V.</p>' : ''}
       <p class="ajuda">Prejuízo fiscal só nasce em meses apurados no Lucro Real e compensa até 30% do lucro de cada mês seguinte. O prejuízo que o comparativo simula para o Real, com a empresa em outro regime, não é compensável.</p>
     </div>
     <div class="bloco"><header><h3>Comparativo do ano ${anoAtual + 1}</h3><span class="chip ouro">mesma operação, três regimes</span></header>
@@ -416,7 +493,7 @@ function abaImpostos() {
         ${REGIMES.map(r => `<tr class="${r === melhor ? 'destaque' : ''}"><td>${NOME_REGIME[r]}${r === S.regime ? ' <span class="chip">atual</span>' : ''}${r === melhor ? ' <span class="chip ok">menor</span>' : ''}</td>
           <td>${tot[r] === null ? 'não se aplica' : brl(tot[r])}</td><td>${tot[r] === null || tot[S.regime] === null || r === S.regime ? '—' : `<span class="${tot[r] < tot[S.regime] ? 'pos' : 'neg'}">${brl(tot[r] - tot[S.regime])}</span>`}</td></tr>`).join('')}
       </table></div>
-      <p class="ajuda">Inclui a contribuição patronal sobre a folha, que muda de um regime para outro. Não inclui a diferença de honorários do contador.</p>
+      <p class="ajuda">Inclui a contribuição patronal sobre a folha, que muda de um regime para outro. Não inclui a diferença de honorários do contador. Todo janeiro o jogo abre a decisão do regime com este comparativo, já somando os honorários.</p>
     </div>` : '<div class="bloco"><p class="ajuda">Feche o primeiro mês para ver os tributos apurados e o comparativo entre regimes.</p></div>'}
     <div class="bloco"><h3>Regras do jogo</h3><p class="ajuda">Alíquotas do Simples pelas tabelas da LC 123/2006 (Anexos I, II, III e V). Se a receita do ano passar do sublimite de R$ 3,6 milhões, ICMS e ISS saem do DAS e passam a ser pagos por fora: no ano seguinte, ou já no mês seguinte se passar de R$ 4,32 milhões. Na 6ª faixa (RBT12 acima de R$ 3,6 mi), enquanto a empresa não está impedida, ICMS e ISS seguem no DAS calculados pela 5ª faixa. Acima do limite de R$ 4,8 milhões no ano a empresa sai do Simples em janeiro, ou no mês seguinte se passar de R$ 5,76 milhões. PIS/COFINS da indústria sem o ICMS na base (Tema 69 do STF). ICMS, ISS e IRPJ/CSLL simplificados: apuração mensal, sem substituição tributária e sem IPI. A transição para IBS e CBS da reforma tributária ainda não está no jogo.</p></div>
   </div>`;
@@ -450,7 +527,9 @@ function abaRelatorios() {
         ${linha('(−) Marketing', x => x.marketing)}
         ${linha('(−) Qualidade', x => x.qualidade)}
         ${linha('(−) Contabilidade', x => x.contador)}
-        ${linha('(−) Outras despesas', x => x.despesas - x.aluguel - x.marketing - x.qualidade - x.contador)}
+        ${linha('(−) Seguro', x => x.seguro || 0)}
+        ${linha('(−) Perdas com clientes', x => x.perdas || 0)}
+        ${linha('(−) Outras despesas', x => x.despesas - x.aluguel - x.marketing - x.qualidade - x.contador - (x.seguro || 0) - (x.perdas || 0))}
         ${linha('(−) Depreciação', x => x.depreciacao)}
         ${linha('(−) Juros', x => x.juros)}
         ${linha('= Lucro antes do IR', x => x.lucroAntesIR, 'total', false)}
@@ -503,7 +582,7 @@ function telaAbertura() {
       ${[[80000, 'Difícil'], [150000, 'Normal'], [300000, 'Folgado']].map(([v, r]) => `<label class="opcao"><input type="radio" name="capital" value="${v}" ${setup.capital === v ? 'checked' : ''}><b>${brl(v)}</b><span>${r}</span></label>`).join('')}
     </div></div>
     <div class="bloco"><h3>Empréstimo inicial (Pronampe)</h3><div class="opcoes">
-      ${[[0, 'Sem dívida'], [50000, '1,6% ao mês, 36 parcelas'], [100000, '1,6% ao mês, 36 parcelas']].map(([v, r]) => `<label class="opcao"><input type="radio" name="emprestimo" value="${v}" ${setup.emprestimo === v ? 'checked' : ''}><b>${v ? brl(v) : 'Nenhum'}</b><span>${r}</span></label>`).join('')}
+      ${[[0, 'Sem dívida'], [50000, 'Selic + 6% ao ano (pós-fixado), 36 parcelas'], [100000, 'Selic + 6% ao ano (pós-fixado), 36 parcelas']].map(([v, r]) => `<label class="opcao"><input type="radio" name="emprestimo" value="${v}" ${setup.emprestimo === v ? 'checked' : ''}><b>${v ? brl(v) : 'Nenhum'}</b><span>${r}</span></label>`).join('')}
     </div></div>
     <div class="bloco"><h3>Regime tributário do primeiro ano</h3><div class="opcoes">
       ${REGIMES.map(r => `<label class="opcao"><input type="radio" name="regime" value="${r}" ${setup.regime === r ? 'checked' : ''}><b>${NOME_REGIME[r]}</b><span>Contador: ${brl(HONORARIOS[r])}/mês</span></label>`).join('')}
@@ -547,7 +626,8 @@ function conteudoModal() {
   }
   if (modal.tipo === 'evento') {
     const e = S.evento;
-    return `<p class="rot">Acontecimento</p><h2>${e.titulo}</h2><p>${e.texto}</p>
+    const rot = e.id === 'regime' ? 'Decisão de janeiro' : e.crise ? 'Crise' : 'Acontecimento';
+    return `<p class="rot">${rot}</p><h2>${e.titulo}</h2><div class="texto-evento">${e.texto}</div>
       <div class="stack apertada">${e.opcoes.map((o, i) => `<button class="btn ${i === 0 ? 'prim' : ''}" data-acao="evento" data-i="${i}">${o}</button>`).join('')}</div>`;
   }
   if (modal.tipo === 'aviso') {
@@ -585,6 +665,7 @@ function aviso(titulo, texto) { modal = { tipo: 'aviso', titulo, texto }; }
 /* ---- eventos de interface ---- */
 function fmtCampo(campo, v) {
   if (campo === 'preco') return brl2(v);
+  if (campo === 'margemAlvo') return pct(v);
   if (campo === 'producao') return num(v) + ' ' + SEG(S).unidades;
   return brl(v);
 }
@@ -597,9 +678,12 @@ function aoDigitar(ev) {
   let v = parseFloat(t.value);
   if (campo === 'proLabore') v = Math.max(SALARIO_MINIMO, v);
   S.dec[campo] = campo === 'producao' ? Math.round(v) : v;
+  if (campo === 'margemAlvo') S.dec.preco = precoPelaMargem(S);
   const out = app.querySelector(`[data-ver="${campo}"]`);
   if (out) out.textContent = fmtCampo(campo, v);
-  const ajudas = { preco: textoPreco, proLabore: textoProLabore, distribuir: textoDistribuir };
+  const bm = document.getElementById('bloco-margem');
+  if (bm && ['preco', 'margemAlvo', 'marketing'].includes(campo)) bm.innerHTML = blocoMargem();
+  const ajudas = { preco: textoPreco, margemAlvo: textoPreco, proLabore: textoProLabore, distribuir: textoDistribuir };
   if (ajudas[campo]) {
     const a = app.querySelector(`[data-ajuda="${campo}"]`);
     if (a) a.textContent = ajudas[campo]();
@@ -626,6 +710,12 @@ function aoMudar(ev) {
   if (t.name === 'prazo') S.dec.prazo = t.value === '1';
   if (t.name === 'producaoAuto') S.dec.producaoAuto = t.value === '1';
   if (t.name === 'politica') S.dec.politica = t.value;
+  if (t.name === 'modoPreco') {
+    S.dec.modoPreco = t.value;
+    // ao ligar a margem, parte da margem do preco atual
+    if (t.value === 'margem' && S.dec.preco > 0) S.dec.margemAlvo = clamp(Math.round(margemContribuicao(S) / S.dec.preco * 100) / 100, 0.05, 0.75);
+  }
+  if (t.name === 'seguro') S.dec.seguro = t.value === '1';
   if (t.name === 'regime') trocarRegime(S, t.value);
   salvar();
   render();

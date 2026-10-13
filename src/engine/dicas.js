@@ -1,7 +1,9 @@
 import { NOME_REGIME, REGIMES } from './regras.js';
-import { SEG, capacidades } from './empresa.js';
+import {
+  SEG, capacidades, margemContribuicao, pontoEquilibrio, precoJusto, dividaTotal,
+} from './empresa.js';
 import { comparativoDoAno } from './simulacao.js';
-import { brl, num, pct } from './formato.js';
+import { brl, brl2, num, pct } from './formato.js';
 
 // "O que o contador diria": diagnostico do ultimo mes e das decisoes em aberto.
 // Devolve [tipo, texto], tipo em '', 'bom', 'ruim', 'aviso'.
@@ -30,6 +32,18 @@ export function dicas(s) {
       out.push(['aviso', `No acumulado do ano, o ${NOME_REGIME[melhor]} teria custado ${brl(tot[s.regime] - tot[melhor])} a menos em tributos. A troca só é possível em janeiro.`]);
     }
   }
+  const mc = margemContribuicao(s);
+  if (mc <= 0) out.push(['ruim', `Cada ${seg.unidade} vendida dá prejuízo: o preço não cobre o custo direto e os tributos. Suba o preço ou defina-o pela margem na aba Comercial.`]);
+  else if (h) {
+    const pe = pontoEquilibrio(s);
+    if (h.vendidos < pe * 0.95) out.push(['aviso', `Ponto de equilíbrio: cerca de ${num(pe)} ${seg.unidades} por mês. Você vendeu ${num(h.vendidos)}. Abaixo dele, o mês fecha no vermelho.`]);
+  }
+  const justo = precoJusto(s);
+  if (s.dec.preco > justo * 1.15) out.push(['aviso', `Seu preço está ${pct(s.dec.preco / justo - 1)} acima do que o cliente acha justo pela sua qualidade e reputação (${brl2(justo)}). Preço alto pede qualidade e marca à altura.`]);
+  if (s.concorrencia >= 0.15) out.push(['aviso', `A concorrência já leva ${pct(s.concorrencia)} da sua procura. Qualidade e reputação seguram cliente; preço baixo demais só troca margem por volume.`]);
+  if (s.selic >= 0.16 && s.emprestimos.some(e => e.posFixado) && s.caixa > dividaTotal(s) * 1.5) out.push(['aviso', `Selic em ${pct(s.selic, 2)}: o Pronampe é pós-fixado e ficou mais caro. Com o caixa folgado, quitar pode valer a pena.`]);
+  if (s.contratoFornecedor && s.contratoFornecedor.ate - s.mes === 1) out.push(['aviso', 'O contrato com o fornecedor acaba no fim deste mês: o custo volta ao preço de mercado, com os reajustes acumulados.']);
+  if (!s.dec.seguro && s.imobilizado - s.deprecAcum > 80000) out.push(['', 'Sem seguro empresarial: uma enchente ou uma quebra grande sai inteira do caixa. Veja a aba Finanças.']);
   if (c.desorg) out.push(['ruim', `A administração não dá conta de ${c.total} pessoas (limite ${c.capAdm}). Produtividade cai e o risco de multa sobe. Contrate no administrativo.`]);
   if (c.apertado) out.push(['ruim', `${c.total} pessoas num espaço para ${c.capEspaco}. Amplie as instalações na aba ${seg.setorProd}.`]);
   if (s.M < 45) out.push(['ruim', 'Moral baixa: a produtividade cai e as pessoas começam a pedir demissão.']);

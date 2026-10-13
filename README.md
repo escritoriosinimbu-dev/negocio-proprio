@@ -1,8 +1,9 @@
 # Negócio Próprio
 
-Jogo de gestão de empresas para Android. O jogador abre um negócio (hamburgueria, confecção ou estúdio de
-software), decide preço, equipe, produção, marketing, crédito e regime tributário, e a cada mês vê o resultado
-no DRE, no fluxo de caixa e no balanço. São 36 meses para fazer a empresa crescer — ou quebrar.
+Jogo de gestão de empresas para Android e navegador. O jogador abre um negócio (hamburgueria, confecção,
+estúdio de software, escritório de contabilidade ou mercadinho), decide preço, equipe, produção, marketing,
+fornecedores, crédito e regime tributário, e a cada mês vê o resultado no DRE, no fluxo de caixa e no
+balanço. São 36 meses para fazer a empresa crescer — ou quebrar.
 
 O que o jogo ensina, de propósito:
 
@@ -10,9 +11,14 @@ O que o jogo ensina, de propósito:
   hoje e vira despesa aos poucos, pela depreciação.
 - **Gargalos.** Procura, capacidade de produção e capacidade de atendimento são três números diferentes, e o
   menor deles decide a venda.
+- **Margem de contribuição.** O preço pode ser definido pela margem; a aba Comercial mostra o custo de cada
+  unidade, a margem e o ponto de equilíbrio. Preço alto só vende com qualidade e reputação à altura.
+- **O mundo não para.** Selic que sobe e desce (empréstimo pós-fixado muda de custo, prefixado não),
+  reajuste anual de salários e aluguel, concorrentes atraídos pelo seu lucro, crises (algumas avisadas
+  antes), fornecedores que reajustam ou oferecem contrato com preço travado.
 - **Regime tributário importa.** Simples Nacional (com RBT12, anexos, Fator R e sublimite), Lucro Presumido e
   Lucro Real são apurados em paralelo todo mês, e a aba Impostos mostra quanto a mesma operação pagaria em
-  cada um. A troca só é permitida em janeiro.
+  cada um. Todo janeiro o jogo abre a decisão do regime com o comparativo do ano.
 
 ## Baixar o APK
 
@@ -94,5 +100,6 @@ O que o jogo trata como na lei, porque é justamente o que um escritório explic
   fiscal compensável até 30% e só se apurado no Real.
 - **Sócio**: pró-labore com INSS até o teto e IRRF pela tabela de 2026 (isenção até R$ 5 mil); retenção de
   10% sobre lucros acima de R$ 50 mil no mês, devolvida no ajuste anual de quem fica abaixo de R$ 600 mil.
+- **Escritório de contabilidade** no Anexo III sem depender do Fator R (LC 123, art. 18 §5º-B, XIV).
 - **Pessoal e contabilidade**: salário irredutível (a política salarial só sobe); custeio por absorção na
   indústria; DFC com caixa inicial e financiamento direto ao fornecedor fora do caixa (CPC 03).
