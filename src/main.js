@@ -20,4 +20,7 @@ if (Capacitor.isNativePlatform()) {
     // na tela raiz, manda o app para segundo plano (como o Android 12+ faz) em vez de mata-lo
     if (!voltar()) App.minimizeApp();
   });
+} else if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  // versao web: o service worker guarda o jogo para abrir sem internet
+  navigator.serviceWorker.register('sw.js').catch(e => console.warn('Service worker nao registrado', e));
 }

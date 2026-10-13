@@ -32,6 +32,19 @@ todos os APKs são assinados com a mesma chave de depuração (`android/app/debu
 O jogo precisa do Android System WebView 111 ou mais novo (Android 7 com o Chrome atualizado já
 serve). Com uma WebView mais antiga, o app mostra uma página pedindo a atualização.
 
+## Versão web (iPhone e navegador)
+
+O mesmo jogo roda como site instalável. No iPhone: abrir o endereço no Safari → **Compartilhar →
+Adicionar à Tela de Início**. Ele ganha ícone, abre em tela cheia e funciona sem internet depois da
+primeira visita (iOS 16.4 ou mais novo). O jogo salvo fica no próprio aparelho, separado do APK.
+
+O workflow **Site** publica a cada push na `main`, em um destes dois lugares:
+
+- **GitHub Pages** — só com o repositório público (Settings → Pages → *Source: GitHub Actions*).
+- **Cloudflare Pages** — funciona com o repositório privado. Basta cadastrar os segredos
+  `CLOUDFLARE_API_TOKEN` (permissão *Cloudflare Pages: Edit*) e `CLOUDFLARE_ACCOUNT_ID` em
+  Settings → Secrets and variables → Actions. O endereço fica `https://negocio-proprio.pages.dev`.
+
 ## Desenvolvimento
 
 Requisitos: Node 22+. Para compilar o APK localmente, também Java 21 e o Android SDK (Android Studio).
