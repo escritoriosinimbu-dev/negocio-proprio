@@ -59,6 +59,14 @@ LC 155/2016). Fatos que não são óbvios e que já custaram um erro:
    participação, e é antecipação do IRPFM: o ajuste em `viradaDeAno` devolve o que passar do imposto
    mínimo (zero para renda abaixo de R$ 600 mil).
 
+## Versão web
+
+O build de `dist/` serve também como site instalável (iPhone pelo Safari, navegador). `vite.config.js` gera
+`sw.js` no build com a lista exata dos arquivos, então cada versão troca o cache inteiro; o registro em
+`src/main.js` só acontece fora do Capacitor e em produção. `.github/workflows/site.yml` publica no GitHub
+Pages (só repositório público) e/ou no Cloudflare Pages (se os segredos existirem) — cada destino liga sozinho.
+Ícones do site em `public/icones/`, gerados de `assets/icon-only.png`.
+
 ## Android
 
 - `android/app/debug.keystore` é versionado de propósito: todos os APKs de CI saem com a mesma assinatura e

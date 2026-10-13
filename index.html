@@ -7,6 +7,14 @@
     <meta name="theme-color" content="#0D1511" media="(prefers-color-scheme: dark)">
     <meta name="description" content="Jogo de gestão: abra uma empresa, tome decisões por setor e veja o DRE e o caixa mês a mês.">
     <title>Negócio Próprio</title>
+    <!-- Versao web instalavel (iPhone: Compartilhar > Adicionar a Tela de Inicio). O Android usa o APK. -->
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" type="image/png" href="icones/icone-192.png">
+    <link rel="apple-touch-icon" href="icones/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Negócio Próprio">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <!-- O piso de WebView do Capacitor nao vale para a Huawei WebView (numeracao propria). Esta checagem
          roda antes do bundle e cobre qualquer provedor: sem :has() ou color-mix() a tela sai quebrada. -->
     <script>
