@@ -1,6 +1,6 @@
 {
   "name": "negocio-proprio",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Jogo de gestao de empresas: decisoes por setor, DRE, caixa e regimes tributarios brasileiros.",
   "scripts": {
     "dev": "vite",
