@@ -1,4 +1,4 @@
-import { NOME_REGIME } from './regras.js';
+import { NOME_REGIME, REGIMES } from './regras.js';
 import { SEG, capacidades } from './empresa.js';
 import { comparativoDoAno } from './simulacao.js';
 import { brl, num, pct } from './formato.js';
@@ -13,16 +13,19 @@ export function dicas(s) {
     if (h.faltaProduto > h.demanda * 0.08) {
       out.push(['ruim', seg.estocavel
         ? 'Faltou produto. Produza mais, contrate na fábrica ou compre equipamento.'
-        : `Faltou capacidade na ${seg.setorProd.toLowerCase()}. Contrate ou invista em equipamento.`]);
+        : `Faltou capacidade ${seg.noSetorProd}. Contrate ou invista em equipamento.`]);
     }
-    if (h.faltaAtend > h.demanda * 0.08) out.push(['ruim', `Faltou gente no ${seg.setorCom.toLowerCase()}: havia cliente, mas ninguém para atender. Contrate ${seg.cargoCom}.`]);
+    if (h.faltaAtend > h.demanda * 0.08) out.push(['ruim', `Faltou gente ${seg.noSetorCom}: havia cliente, mas ninguém para atender. Contrate ${seg.umCargoCom}.`]);
     const usado = seg.estocavel ? h.produzido : h.vendidos;
     if (h.capacidade > 0 && usado < h.capacidade * 0.6 && h.faltaAtend < h.demanda * 0.05) {
-      out.push(['aviso', `Capacidade ociosa: a equipe de ${seg.setorProd.toLowerCase()} pode fazer ${num(h.capacidade)} e foram usadas ${num(usado)}. Mais marketing, preço menor ou equipe menor.`]);
+      out.push(['aviso', `Capacidade ociosa: a equipe ${seg.noSetorProd} pode fazer ${num(h.capacidade)} e foram usadas ${num(usado)}. Mais marketing, preço menor ou equipe menor.`]);
     }
     if (seg.estocavel && s.estoque > h.vendidos * 1.5 && s.estoque > 300) out.push(['aviso', `Estoque de ${num(s.estoque)} ${seg.unidades} parado. Estoque é dinheiro empatado e custa armazenagem.`]);
     if (s.regime === 'simples' && h.anexo === 'V') out.push(['aviso', `Fator R em ${pct(h.fatorR)}: abaixo de 28% o serviço cai no Anexo V do Simples. Um pró-labore maior pode levar a empresa ao Anexo III.`]);
-    const { tot, melhor } = comparativoDoAno(s, Math.floor(h.mes / 12));
+    const { tot } = comparativoDoAno(s, Math.floor(h.mes / 12));
+    // so recomenda regime que ainda pode ser adotado (o Simples pode estar fechado em janeiro)
+    const melhor = REGIMES.filter(r => tot[r] !== null && !(r === 'simples' && s.excluidoSimples))
+      .sort((a, b) => tot[a] - tot[b])[0];
     if (melhor && melhor !== s.regime && tot[s.regime] !== null && tot[s.regime] - tot[melhor] > Math.max(3000, tot[s.regime] * 0.1)) {
       out.push(['aviso', `No acumulado do ano, o ${NOME_REGIME[melhor]} teria custado ${brl(tot[s.regime] - tot[melhor])} a menos em tributos. A troca só é possível em janeiro.`]);
     }

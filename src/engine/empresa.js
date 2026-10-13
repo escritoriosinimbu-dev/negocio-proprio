@@ -1,4 +1,8 @@
-import { SEGMENTOS, POLITICA, SETORES } from './regras.js';
+import {
+  SEGMENTOS, POLITICA, SETORES, CAPITAL_REFERENCIA, ENCARGOS_FOLHA, SALARIO_MINIMO, LIMITE_SIMPLES, TOLERANCIA_EXCESSO,
+  LIMITE_ISENCAO_DIVIDENDOS, ALIQ_RETENCAO_DIVIDENDOS,
+} from './regras.js';
+import { liquidoProLabore } from './tributos.js';
 
 // Estado da empresa e indicadores derivados. Tudo aqui e funcao pura sobre o estado `s`,
 // que e um objeto JSON simples (vai inteiro para o armazenamento do aparelho).
@@ -7,7 +11,7 @@ export const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 export const soma = (arr, f) => arr.reduce((t, x) => t + f(x), 0);
 export const SEG = s => SEGMENTOS[s.segmento];
 
-export const VERSAO_ESTADO = 1;
+export const VERSAO_ESTADO = 2;
 
 export function novoJogo({ nome, segmento, capital, emprestimo, regime }) {
   const seg = SEGMENTOS[segmento];
@@ -17,7 +21,7 @@ export function novoJogo({ nome, segmento, capital, emprestimo, regime }) {
     func: { ...seg.funcInicial },
     dec: {
       preco: seg.precoRef, marketing: Math.round(seg.mkEscala * 0.5 / 100) * 100,
-      qualidade: Math.round(seg.qEscala * 0.4 / 100) * 100, producao: 0, proLabore: 3000,
+      qualidade: Math.round(seg.qEscala * 0.4 / 100) * 100, producao: 0, producaoAuto: true, proLabore: 3000,
       politica: 'mercado', prazo: false, func: { ...seg.funcInicial },
       emprestimo: 0, distribuir: 0,
     },
@@ -30,8 +34,13 @@ export function novoJogo({ nome, segmento, capital, emprestimo, regime }) {
     prejuizo: { simples: 0, presumido: 0, real: 0 },
     hist: [], negativos: 0, fim: null, evento: null, modoLivre: false,
     excluidoSimples: false, investidorUsado: false, creditoUsado: false,
-    investidoMes: 0, captadoMes: 0, distribuidoMes: 0, quitadoMes: 0,
+    investidoMes: 0, captadoMes: 0, distribuidoMes: 0, quitadoMes: 0, financiadoMes: 0,
+    dividendosDonoMes: 0, irrfDivMes: 0,
     lucroAcum: 0, distribuido: 0, retirado: 0, irrfDiv: 0, proLaboreAcum: 0,
+    // saldo de prejuizo fiscal de verdade (Lalur): so nasce em meses apurados no Lucro Real
+    prejuizoFiscal: 0,
+    // politica salarial ja praticada: salario de quem esta empregado nao pode cair (CF, art. 7o, VI)
+    politicaPaga: 'mercado',
   };
   s.dec.producao = Math.min(capacidades(s, s.dec.func).capacidade, Math.round(demandaEsperada(s) * 1.1 / 10) * 10);
   return s;
@@ -49,7 +58,7 @@ export function capacidades(s, func = s.func) {
   const capEspaco = 10 + 10 * s.espacoNivel;
   const apertado = total > capEspaco;
   const moral = 0.7 + 0.45 * s.M / 100;
-  const fator = moral * (1 + 0.2 * s.equipNivel) * (desorg ? 0.9 : 1) * (apertado ? 0.85 : 1) * efeito(s, 'producao');
+  const fator = moral * (1 + seg.ganhoEquip * s.equipNivel) * (desorg ? 0.9 : 1) * (apertado ? 0.85 : 1) * efeito(s, 'producao');
   return {
     capacidade: Math.floor(func.producao * seg.prodPorFunc * fator),
     cobertura: Math.floor((seg.capDono + func.comercial * seg.capVenda * moral) * (desorg ? 0.9 : 1)),
@@ -62,6 +71,11 @@ export function demandaEsperada(s, d = s.dec) {
   const atracao = (0.15 + 0.85 * s.A / 100) * (0.7 + 0.6 * s.Q / 100);
   return seg.mercado * s.mercadoMult * Math.pow(s.precoRef / d.preco, seg.elasticidade) * atracao
     * seg.sazonal[s.mes % 12] * s.economia * (d.prazo ? 1.15 : 1) * efeito(s, 'demanda');
+}
+
+// Plano automatico da industria: procura prevista + 5% + pedidos especiais - estoque.
+export function planoProducaoAuto(s) {
+  return Math.max(0, Math.round((demandaEsperada(s) * 1.05 + soma(s.pedidos, p => p.qtd) - s.estoque) / 10) * 10);
 }
 
 export function salario(seg, setor, politica) {
@@ -81,7 +95,13 @@ export function patrimonio(s) {
 }
 
 export function lucro12(s) { return soma(s.hist.slice(-12), h => h.lucro); }
-export function valorEmpresa(s) { return Math.max(0, patrimonio(s) + 3 * Math.max(0, lucro12(s))); }
+// Patrimonio liquido, trocando o imobilizado pelo valor do lucro que ele gera quando este e maior:
+// caixa + recebiveis + estoque - divida + max(imobilizado liquido, 3x o lucro de 12 meses).
+// Somar PL + 3x lucro contava duas vezes os equipamentos que produzem esse lucro.
+export function valorEmpresa(s) {
+  const imob = s.imobilizado - s.deprecAcum;
+  return Math.max(0, patrimonio(s) + Math.max(0, 3 * Math.max(0, lucro12(s)) - imob));
+}
 
 export function mediaReceita(s, n = 3) {
   const h = s.hist.slice(-n);
@@ -95,15 +115,63 @@ export function limiteCredito(s) {
 export function taxaCapitalGiro(s) { return 0.024 + s.ajusteJuros + (patrimonio(s) < 0 ? 0.01 : 0); }
 export function limiteCheque(s) { return 20000 + 0.5 * mediaReceita(s); }
 
-// O que o dono levou: pro-labore liquido do INSS, lucros recebidos e a parte dele no valor da empresa.
+// O que o dono levou: pro-labore liquido de INSS e IRRF, lucros recebidos (liquidos de retencao)
+// e a parte dele no valor da empresa.
 export function riquezaDono(s) {
-  return s.retirado + s.proLaboreAcum * 0.89 + s.participacao * valorEmpresa(s);
+  return s.retirado + soma(s.hist, h => liquidoProLabore(h.proLabore)) + s.participacao * valorEmpresa(s);
+}
+
+// Fator salarial mais baixo permitido: depois do primeiro mes, a politica so sobe.
+export function politicaPermitida(s, politica) {
+  return s.mes === 0 || POLITICA[politica].fator >= POLITICA[s.politicaPaga].fator;
 }
 
 export function lucroDisponivel(s) { return Math.max(0, s.lucroAcum - s.distribuido); }
 
+// Multiplo da nota: 1 + ganho / capital de referencia (igual a riqueza/capital quando o capital e o normal).
+export function multiploNota(s) {
+  return 1 + (riquezaDono(s) - s.capitalInicial) / CAPITAL_REFERENCIA;
+}
+
 export function notaFinal(s) {
   if (s.fim === 'falencia') return 'F';
-  const mult = riquezaDono(s) / s.capitalInicial;
+  const mult = multiploNota(s);
   return mult >= 4 ? 'A' : mult >= 2.5 ? 'B' : mult >= 1.5 ? 'C' : mult >= 1 ? 'D' : 'E';
+}
+
+// Atualiza um jogo salvo por uma versao anterior. Devolve o mesmo objeto.
+export function migrarEstado(s) {
+  if ((s.v || 1) < 2) {
+    s.dec.producaoAuto = true; // v1 travava a producao no valor do mes 0
+    s.politicaPaga = s.dec.politica;
+    s.financiadoMes = s.financiadoMes || 0;
+    s.dec.proLabore = Math.max(SALARIO_MINIMO, s.dec.proLabore);
+    // Campos novos do historico, reconstruidos pela regra da v1 (o dono recebia 100% e a retencao
+    // era 10% do total do mes acima de R$ 50 mil): sem eles, o ajuste anual nao devolveria o IR retido.
+    const retV1 = v => (v > LIMITE_ISENCAO_DIVIDENDOS ? v * ALIQ_RETENCAO_DIVIDENDOS : 0);
+    const anoDe = m => Math.floor(m / 12), rbaAno = {};
+    let lalur = 0;
+    for (const h of s.hist) {
+      // Fator R passou a contar 13o, ferias e FGTS (LC 123, art. 18 §24)
+      h.folhaFatorR = h.folha * (1 + ENCARGOS_FOLHA) + h.proLabore;
+      h.dividendosDono ??= h.distribuido || 0;
+      h.irrfDividendos ??= retV1(h.distribuido || 0);
+      rbaAno[anoDe(h.mes)] = (rbaAno[anoDe(h.mes)] || 0) + h.receita;
+      h.rba ??= rbaAno[anoDe(h.mes)];
+      // Lalur refeito so com os meses apurados no Real (a v1 misturava o prejuizo simulado)
+      if (h.regime === 'real') lalur = h.lucroAntesIR <= 0 ? lalur - h.lucroAntesIR : lalur - Math.min(lalur, 0.3 * h.lucroAntesIR);
+    }
+    s.dividendosDonoMes = s.distribuidoMes || 0;
+    s.irrfDivMes = retV1(s.distribuidoMes || 0);
+    s.prejuizoFiscal = lalur;
+    if (s.regime === 'real') s.prejuizo.real = lalur;
+    // A v1 nunca desligava a exclusao do Simples; a v2 a recalcula pelo ano-calendario.
+    if (s.excluidoSimples) {
+      const receitaDoAno = a => soma(s.hist.filter(h => anoDe(h.mes) === a), h => h.receita);
+      const ano = anoDe(s.mes);
+      s.excluidoSimples = receitaDoAno(ano - 1) > LIMITE_SIMPLES || receitaDoAno(ano) > LIMITE_SIMPLES * (1 + TOLERANCIA_EXCESSO);
+    }
+    s.v = 2;
+  }
+  return s;
 }

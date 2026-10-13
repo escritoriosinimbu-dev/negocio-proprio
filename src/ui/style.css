@@ -26,7 +26,7 @@
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; -webkit-tap-highlight-color: transparent; overscroll-behavior-y: none; background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.5; }
-#app { max-width: 760px; margin: 0 auto; padding-inline: calc(16px + var(--sal)) calc(16px + var(--sar)); padding-block: calc(16px + var(--sat)) calc(140px + var(--sab)); }
+#app { max-width: 760px; margin: 0 auto; padding-inline: calc(16px + var(--sal)) calc(16px + var(--sar)); padding-block: calc(16px + var(--sat)) calc(var(--rodape-h, 140px) + 16px); }
 h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; line-height: 1.15; }
 h2 { font-size: 1.25rem; font-weight: 700; }
 h3 { font-size: 1.02rem; font-weight: 700; }
@@ -86,7 +86,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, label:focus-wit
 .campo output { font-family: var(--f-num); font-weight: 600; }
 input[type="range"] { width: 100%; accent-color: var(--accent); }
 .stepper { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg); }
-.stepper button { width: 40px; height: 38px; border: 0; background: none; font-size: 1.2rem; font-weight: 600; }
+.stepper button { width: 48px; height: 48px; border: 0; background: none; font-size: 1.2rem; font-weight: 600; }
 .stepper button:active { background: var(--sunk); }
 .stepper output { min-width: 34px; text-align: center; font-family: var(--f-num); font-weight: 600; }
 .linha-func { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -139,9 +139,12 @@ tr.destaque td { background: var(--accent-soft); }
 /* rodape */
 .rodape { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line);
   padding: 10px calc(16px + var(--sar)) calc(10px + var(--sab)) calc(16px + var(--sal)); z-index: 5; }
-.rodape .dentro { max-width: 760px; margin: 0 auto; display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+.rodape .dentro { max-width: 760px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; }
+.rodape .previsao { flex: 999 1 13em; }
+.rodape .fechar { flex: 1 0 auto; max-width: 100%; }
 .previsao { font-size: 0.78rem; color: var(--muted); min-width: 0; line-height: 1.35; }
 .previsao b { color: var(--ink); font-family: var(--f-num); font-weight: 600; }
+.previsao b.neg { color: var(--bad); }
 .fechar { flex: none; background: var(--accent); color: var(--on-accent); border: 0; border-radius: 10px; padding: 12px 18px; font-family: var(--f-display); font-weight: 700; font-size: 1rem; }
 
 /* modal */

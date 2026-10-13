@@ -1,9 +1,11 @@
 import {
-  SEGMENTOS, REGIMES, NOME_REGIME, HONORARIOS, POLITICA, MESES, DURACAO, SALARIO_MINIMO,
+  SEGMENTOS, REGIMES, NOME_REGIME, HONORARIOS, POLITICA, MESES, DURACAO, SALARIO_MINIMO, TETO_INSS,
+  LIMITE_ISENCAO_DIVIDENDOS,
   brl, brl2, num, pct, brlK,
   SEG, clamp, soma, novoJogo, capacidades, demandaEsperada, salario, folhaPrevista,
   dividaTotal, totalReceber, patrimonio, valorEmpresa, limiteCredito, taxaCapitalGiro, limiteCheque,
-  riquezaDono, lucroDisponivel, notaFinal,
+  riquezaDono, lucroDisponivel, notaFinal, multiploNota, CAPITAL_REFERENCIA, politicaPermitida, planoProducaoAuto,
+  migrarEstado, liquidoProLabore, irrfDaDistribuicao, jogoEncerrado,
   custoEquip, custoEspaco, comprar, contratarEmprestimo, quitarEmprestimo, distribuirLucros,
   NIVEL_MAX_EQUIP, NIVEL_MAX_ESPACO,
   fecharMes, comparativoDoAno, podeTrocarRegime, trocarRegime, resolverEvento, dicas,
@@ -21,6 +23,13 @@ let setup = { nome: 'Minha Empresa', segmento: 'hamburgueria', capital: 150000, 
 let app = null;
 let veu = null;
 
+// O rodape fixo muda de altura com a escala de fonte do Android (a WebView aplica a do sistema):
+// a reserva no fim da pagina acompanha a altura medida.
+const medirRodape = typeof ResizeObserver === 'function'
+  ? new ResizeObserver(([e]) => document.documentElement.style.setProperty('--rodape-h', Math.ceil(e.target.getBoundingClientRect().height) + 'px'))
+  : null;
+
+const REGUA = 'A a partir de 4×, B de 2,5×, C de 1,5×, D de 1×';
 const ABAS = ['painel', 'producao', 'comercial', 'pessoas', 'financas', 'impostos', 'relatorios'];
 
 function salvar() { salvarJogo({ S, aba }); }
@@ -30,7 +39,14 @@ function sinal(v) { return v < 0 ? 'neg' : v > 0 ? 'pos' : ''; }
 function esc(t) { return String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
 function render() {
-  if (!S) { app.innerHTML = telaAbertura(); renderModal(); return; }
+  if (!S) {
+    // a abertura nao tem rodape: sem isso o observer gravaria a altura 0 do rodape removido
+    if (medirRodape) medirRodape.disconnect();
+    document.documentElement.style.removeProperty('--rodape-h');
+    app.innerHTML = telaAbertura();
+    renderModal();
+    return;
+  }
   const seg = SEG(S), am = anoMes(S.mes), h = S.hist.at(-1);
   app.innerHTML = `
     <div class="topo">
@@ -54,8 +70,10 @@ function render() {
     <div id="aba">${renderAba()}</div>
     <div class="rodape"><div class="dentro">
       <div class="previsao" id="previsao">${textoPrevisao()}</div>
-      <button class="fechar" data-acao="fechar" ${S.fim && !S.modoLivre ? 'disabled' : ''}>Fechar ${MESES[S.mes % 12].toLowerCase()} →</button>
+      <button class="fechar" data-acao="fechar" ${jogoEncerrado(S) ? 'disabled' : ''}>Fechar ${MESES[S.mes % 12].toLowerCase()} →</button>
     </div></div>`;
+  const rod = app.querySelector('.rodape');
+  if (medirRodape && rod) { medirRodape.disconnect(); medirRodape.observe(rod); }
   const sel = app.querySelector('.abas [aria-selected="true"]');
   if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   renderModal();
@@ -66,12 +84,26 @@ function medidor(nome, v) {
   return `<div class="medidor"><span>${nome}</span><span class="barra"><i style="width:${v}%" class="${v < 35 ? 'baixo' : ''}"></i></span><span class="num">${Math.round(v)}</span></div>`;
 }
 
+// Fecha o mes numa copia do estado, sem sorte nem azar (rnd = 0,5 nao sorteia acontecimento nem
+// saida de funcionario), para mostrar o caixa provavel antes de o jogador decidir.
+function caixaPrevisto() {
+  try {
+    // o fechamento nunca le mais de 24 meses de historico: nao clona o resto a cada passo do slider
+    return fecharMes(structuredClone({ ...S, hist: S.hist.slice(-24) }), () => 0.5).caixa;
+  } catch (e) {
+    return null;
+  }
+}
+
 function textoPrevisao() {
   const seg = SEG(S), c = capacidades(S, S.dec.func), dem = Math.round(demandaEsperada(S));
-  const oferta = seg.estocavel ? Math.min(S.dec.producao, c.capacidade) + S.estoque : c.capacidade;
+  const plano = seg.estocavel ? Math.min(S.dec.producaoAuto ? planoProducaoAuto(S) : S.dec.producao, c.capacidade) : 0;
+  const oferta = (seg.estocavel ? plano + S.estoque : c.capacidade) - soma(S.pedidos, p => p.qtd);
   const gargalo = c.cobertura < Math.min(dem, oferta) ? 'atendimento' : oferta < dem ? (seg.estocavel ? 'produção' : 'capacidade') : null;
-  const cap = seg.estocavel ? `produção <b>${num(Math.min(S.dec.producao, c.capacidade))}</b> + estoque <b>${num(S.estoque)}</b>` : `capacidade <b>${num(c.capacidade)}</b>`;
-  return `Procura estimada <b>${num(dem)}</b> ${seg.unidades} · ${cap} · atendimento <b>${num(c.cobertura)}</b>${gargalo ? ` <span class="chip alerta">gargalo: ${gargalo}</span>` : ''}`;
+  const cap = seg.estocavel ? `produção <b>${num(plano)}</b> + estoque <b>${num(S.estoque)}</b>` : `capacidade <b>${num(c.capacidade)}</b>`;
+  const cx = jogoEncerrado(S) ? null : caixaPrevisto();
+  const caixa = cx === null ? '' : ` · caixa previsto <b class="${cx < 0 ? 'neg' : ''}">${brl(cx)}</b>`;
+  return `Procura estimada <b>${num(dem)}</b> ${seg.unidades} · ${cap} · atendimento <b>${num(c.cobertura)}</b>${caixa}${gargalo ? ` <span class="chip alerta">gargalo: ${gargalo}</span>` : ''}${cx !== null && cx < 0 ? ' <span class="chip alerta">caixa negativo</span>' : ''}`;
 }
 
 function renderAba() {
@@ -98,7 +130,7 @@ function abaPainel() {
         <ul class="noticias">
           <li>Em cada aba você toma as decisões de um setor: equipe, preço, marketing, compras, crédito e regime tributário.</li>
           <li>Quando estiver pronto, toque em <b>Fechar o mês</b>. O jogo calcula vendas, custos, tributos e caixa e mostra o resultado.</li>
-          <li>Três meses seguidos com o caixa negativo e a empresa quebra. A meta é chegar ao fim do ano ${DURACAO / 12} com a empresa valendo mais do que você colocou nela.</li>
+          <li>Três meses seguidos com o caixa negativo e a empresa quebra. No fim do ano ${DURACAO / 12}, a nota mede o seu ganho: o que você levou (pró-labore líquido, lucros recebidos e sua parte no valor da empresa) menos o capital que colocou. Múltiplo = 1 + ganho ÷ ${brl(CAPITAL_REFERENCIA)}: ${REGUA}.</li>
         </ul>
       </div>
       ${blocoDicas()}
@@ -113,11 +145,16 @@ function abaPainel() {
     <div class="bloco grafico"><header><h3>Receita e caixa</h3>
       <div class="legenda"><span><i class="leg-receita"></i>Receita</span><span><i class="leg-caixa"></i>Caixa</span><span><i class="leg-lucro"></i>Lucro</span></div></header>
       ${grafico()}</div>
+    <div class="kpis">${kpi('Nota se acabasse hoje', notaFinal(S))}${kpi('Múltiplo', fmtMultiplo(multiploNota(S)))}${kpi('Valor da empresa', brlK(valorEmpresa(S)))}${kpi('Meses restantes', S.modoLivre ? '—' : Math.max(0, DURACAO - S.mes))}</div>
+    <p class="ajuda">Régua da nota: ${REGUA}.</p>
     ${blocoDicas()}
     <div class="bloco"><h3>Acontecimentos de ${MESES[h.mes % 12].toLowerCase()}</h3>${listaNoticias(h.noticias)}</div>
     ${reiniciar}
   </div>`;
 }
+
+// truncado para baixo: o numero mostrado nunca alcanca um corte de nota que o jogador nao alcancou
+function fmtMultiplo(m) { return (Math.floor(m * 10) / 10).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '×'; }
 
 function kpi(r, v, cls = '') { return `<div class="kpi"><div class="rot">${r}</div><div class="v ${cls}">${v}</div></div>`; }
 
@@ -203,13 +240,19 @@ function abaProducao() {
       <p class="ajuda">Cada ${seg.cargoProd} faz cerca de ${num(seg.prodPorFunc)} ${seg.unidades} por mês. Moral, equipamento, espaço e organização mudam esse número.</p>
     </div>
     ${seg.estocavel ? `<div class="bloco"><header><h3>Plano de produção</h3><span class="chip">estoque: ${num(S.estoque)}</span></header>
-      ${slider('producao', 'Produzir neste mês', Math.min(S.dec.producao, c.capacidade), 0, Math.max(c.capacidade, 1), 10, v => num(v) + ' ' + seg.unidades,
-        `Matéria-prima: ${brl2(S.custoMat)} por ${seg.unidade}. O que não vender fica em estoque (armazenagem de 1,5% ao mês).`)}
+      <div class="opcoes">
+        <label class="opcao"><input type="radio" name="producaoAuto" value="1" ${S.dec.producaoAuto ? 'checked' : ''}><b>Automático</b><span>Produz a procura prevista + 5%, descontado o estoque.</span></label>
+        <label class="opcao"><input type="radio" name="producaoAuto" value="0" ${!S.dec.producaoAuto ? 'checked' : ''}><b>Manual</b><span>Você decide. Útil para formar estoque antes do Natal.</span></label>
+      </div>
+      ${S.dec.producaoAuto
+        ? `<p class="ajuda">Plano deste mês: cerca de ${num(Math.min(c.capacidade, planoProducaoAuto(S)))} ${seg.unidades} (capacidade ${num(c.capacidade)}). Matéria-prima: ${brl2(S.custoMat)} por ${seg.unidade}.</p>`
+        : slider('producao', 'Produzir neste mês', Math.min(S.dec.producao, c.capacidade), 0, Math.max(c.capacidade, 1), 10, v => num(v) + ' ' + seg.unidades,
+          `Matéria-prima: ${brl2(S.custoMat)} por ${seg.unidade}. O que não vender fica em estoque (armazenagem de 1,5% ao mês).`)}
     </div>` : `<div class="bloco"><h3>Produção sob demanda</h3><p class="ajuda">${seg.tipo === 'servico'
         ? `Serviço não se estoca: a equipe entrega até ${num(c.capacidade)} horas por mês. Custo direto de ${brl2(S.custoMat)} por hora (ferramentas e servidores).`
         : `A cozinha prepara conforme o pedido, até ${num(c.capacidade)} refeições por mês. Insumos: ${brl2(S.custoMat)} por refeição, mais 6% de desperdício.`}</p></div>`}
     <div class="bloco"><header><h3>Equipamentos</h3><span class="chip ${S.equipNivel ? 'ok' : ''}">nível ${S.equipNivel} de ${NIVEL_MAX_EQUIP}</span></header>
-      <p class="ajuda">Cada nível aumenta a produtividade em 20% e a qualidade em 3 pontos. O valor vai para o imobilizado e é depreciado em 10 anos.</p>
+      <p class="ajuda">Cada nível aumenta a produtividade em ${pct(seg.ganhoEquip)} e a qualidade em 3 pontos. O valor vai para o imobilizado e é depreciado em 10 anos.</p>
       ${S.equipNivel < NIVEL_MAX_EQUIP ? botaoCompra('equip', 'Comprar nível ' + (S.equipNivel + 1), custoEquip(S)) : '<p class="small muted">Nível máximo.</p>'}
     </div>
     <div class="bloco"><header><h3>Instalações</h3><span class="chip ${c.apertado ? 'alerta' : ''}">${c.total} de ${c.capEspaco} pessoas</span></header>
@@ -271,8 +314,8 @@ function abaPessoas() {
       ${c.desorg ? '<p class="small neg">A administração não dá conta: produtividade −10% e risco de multa.</p>' : ''}
     </div>
     <div class="bloco"><header><h3>Política salarial</h3><span class="chip">moral ${Math.round(S.M)}</span></header>
-      <div class="opcoes">${Object.entries(POLITICA).map(([k, p]) => `<label class="opcao"><input type="radio" name="politica" value="${k}" ${S.dec.politica === k ? 'checked' : ''}><b>${p.nome}</b><span>salários × ${p.fator.toLocaleString('pt-BR')}</span></label>`).join('')}</div>
-      <p class="ajuda">Moral alta aumenta a produtividade. Abaixo de 50, as pessoas começam a pedir demissão.</p>
+      <div class="opcoes">${Object.entries(POLITICA).map(([k, p]) => `<label class="opcao"><input type="radio" name="politica" value="${k}" ${S.dec.politica === k ? 'checked' : ''} ${politicaPermitida(S, k) ? '' : 'disabled'}><b>${p.nome}</b><span>salários × ${p.fator.toLocaleString('pt-BR')}</span></label>`).join('')}</div>
+      <p class="ajuda">Moral alta aumenta a produtividade. Abaixo de 50, as pessoas começam a pedir demissão. ${S.mes > 0 ? 'Salário de quem já está na empresa não pode ser reduzido (CF, art. 7º, VI): a política só sobe. Para cortar folha, só demitindo, e isso custa 1,3 salário.' : 'Depois do primeiro mês, a política só pode subir: salário não se reduz.'}</p>
     </div>
     <div class="bloco"><h3>Encargos sobre a folha</h3>
       <p class="ajuda">FGTS e provisões de 13º e férias somam cerca de 30% em qualquer regime. Fora do Simples entram ainda INSS patronal, RAT e terceiros (≈ 33%) e 20% sobre o pró-labore. No Simples, essa contribuição já está dentro do DAS.</p>
@@ -312,15 +355,27 @@ function abaFinancas() {
       <p class="ajuda">Se o caixa fechar o mês negativo, o banco cobre com cheque especial a 8% ao mês. Limite do cheque especial: ${brl(limiteCheque(S))}.</p>
     </div>
     <div class="bloco"><h3>Remuneração do sócio</h3>
-      ${slider('proLabore', 'Pró-labore mensal', S.dec.proLabore, SALARIO_MINIMO, 30000, 1, brl, 'Seu salário como sócio. Tem INSS de 11% retido e entra no cálculo do Fator R do Simples.')}
+      ${slider('proLabore', 'Pró-labore mensal', S.dec.proLabore, 1600, 30000, 100, brl, textoProLabore())}
       <div class="campo"><p><b>Distribuir lucros</b> <span class="small muted">· lucro acumulado disponível: ${brl(disp)}</span></p>
-        ${maxDist >= 1000 ? `${slider('distribuir', 'Valor a distribuir', S.dec.distribuir, 0, maxDist, 1000, brl, 'Desde 2026, a distribuição acima de R$ 50 mil no mês para a mesma pessoa tem retenção de 10% de IR (regra simplificada no jogo).')}
+        ${maxDist >= 1000 ? `${slider('distribuir', 'Valor a distribuir', S.dec.distribuir, 0, maxDist, 1000, brl, textoDistribuir())}
           <div class="row"><button class="btn" data-acao="distribuir" ${S.dec.distribuir < 1000 ? 'disabled' : ''}>Distribuir ${brl(S.dec.distribuir)}</button></div>`
           : '<p class="small muted">Só é possível distribuir lucro que já existe e cabe no caixa.</p>'}
       </div>
       <div class="kpis">${kpi('Pró-labore recebido', brl(S.proLaboreAcum))}${kpi('Lucros recebidos', brl(S.retirado))}${kpi('Sua parte', pct(S.participacao))}${kpi('Valor da empresa', brlK(valorEmpresa(S)))}</div>
     </div>
   </div>`;
+}
+
+function textoProLabore() {
+  const b = S.dec.proLabore;
+  return `Líquido para você: cerca de ${brl(liquidoProLabore(b))} (INSS de 11% até o teto de ${brl2(TETO_INSS)} e IR na fonte pela tabela; até R$ 5 mil o IR é zero). Fora do Simples a empresa paga ainda 20% de INSS sobre ele. Entra no Fator R do Simples.`;
+}
+
+function textoDistribuir() {
+  const v = S.dec.distribuir || 0, ret = irrfDaDistribuicao(S, v);
+  const parte = S.participacao < 1 ? ` Você recebe ${pct(S.participacao)}; o resto vai para o investidor.` : '';
+  const ja = S.distribuidoMes ? ` Já distribuído neste mês: ${brl(S.distribuidoMes)}.` : '';
+  return `Retenção prevista: ${brl(ret)}.${ja} Acima de ${brl(LIMITE_ISENCAO_DIVIDENDOS)} no mês para a mesma pessoa, a empresa retém 10% sobre tudo o que foi pago no mês (Lei 15.270/2025). É antecipação: no ajuste anual, quem tem renda abaixo de R$ 600 mil no ano recebe de volta.${parte}`;
 }
 
 /* ---- Impostos ---- */
@@ -331,7 +386,9 @@ function abaImpostos() {
   const descr = {
     simples: seg.tipo === 'servico' ? 'Guia única (DAS). Anexo III ou V conforme o Fator R.' : `Guia única (DAS), Anexo ${seg.tipo === 'comercio' ? 'I' : 'II'}. Limite de R$ 4,8 mi por ano.`,
     presumido: `IRPJ e CSLL sobre uma margem presumida de ${seg.tipo === 'servico' ? '32%' : '8% e 12%'}. PIS/COFINS cumulativos.`,
-    real: 'IRPJ e CSLL sobre o lucro de verdade. PIS/COFINS com créditos. Contabilidade mais cara.',
+    real: seg.pisCofinsCumulativo
+      ? 'IRPJ e CSLL sobre o lucro de verdade. Desenvolvimento de software fica no PIS/COFINS cumulativo (3,65%) mesmo no Real. Contabilidade mais cara.'
+      : 'IRPJ e CSLL sobre o lucro de verdade. PIS/COFINS não cumulativos, com créditos. Contabilidade mais cara.',
   };
   return `<div class="stack">
     <div class="bloco"><header><h3>Regime tributário</h3>${janeiro ? '<span class="chip ok">janeiro: pode trocar</span>' : '<span class="chip">troca só em janeiro</span>'}</header>
@@ -340,7 +397,7 @@ function abaImpostos() {
         return `<label class="opcao"><input type="radio" name="regime" value="${r}" ${S.regime === r ? 'checked' : ''} ${bloqueado ? 'disabled' : ''}>
           <b>${NOME_REGIME[r]}</b><span>${descr[r]} Contador: ${brl(HONORARIOS[r])}/mês.</span></label>`;
       }).join('')}</div>
-      ${S.excluidoSimples ? '<p class="small war">A empresa ultrapassou o limite do Simples Nacional.</p>' : ''}
+      ${S.excluidoSimples ? '<p class="small war">A receita do ano passou do limite de R$ 4,8 milhões: o Simples fica fechado até um janeiro depois de um ano dentro do limite.</p>' : ''}
     </div>
     ${h ? `<div class="bloco"><header><h3>Tributos de ${MESES[h.mes % 12].toLowerCase()}</h3><span class="chip">${NOME_REGIME[h.regime]}</span></header>
       <div class="tab-wrap"><table>
@@ -348,8 +405,10 @@ function abaImpostos() {
         <tr class="total"><td>Total</td><td>${brl(h.tributos)}</td></tr>
         <tr class="sub"><td>Sobre a receita de ${brl(h.receita)}</td><td>${h.receita ? pct(h.tributos / h.receita, 1) : '—'}</td></tr>
       </table></div>
-      <div class="kpis">${kpi('RBT12', brlK(h.rbt12))}${kpi('Fator R', pct(h.fatorR))}${kpi('Anexo', h.anexo || '—')}${kpi(S.regime === 'real' ? 'Prejuízo a compensar' : 'Prejuízo fiscal no Real', brl(S.prejuizo.real))}</div>
-      <p class="ajuda">RBT12 é a receita dos 12 meses anteriores; no primeiro ano, a média dos meses já fechados vezes 12. Ela define a faixa do Simples. Prejuízo fiscal só existe no Lucro Real e compensa até 30% do lucro de cada mês seguinte.</p>
+      <div class="kpis">${kpi('RBT12', brlK(h.rbt12))}${kpi('Fator R', pct(h.fatorR))}${kpi('Anexo', h.anexo || '—')}${kpi('Prejuízo fiscal a compensar', brl(S.prejuizoFiscal || 0))}</div>
+      <p class="ajuda">RBT12 é a receita dos 12 meses anteriores e define a faixa (alíquota) do Simples. No 1º mês usa-se a receita do próprio mês × 12; do 2º ao 12º, a média dos meses anteriores × 12. O limite de R$ 4,8 milhões e o sublimite de R$ 3,6 milhões se medem pela receita do ano (janeiro a dezembro), que até agora soma ${brlK(soma(S.hist.filter(x => Math.floor(x.mes / 12) === anoAtual), x => x.receita))}.</p>
+      <p class="ajuda">Fator R = salários, 13º, férias, FGTS e pró-labore dos 12 meses anteriores ÷ RBT12. Com 28% ou mais, o serviço vai para o Anexo III; abaixo, para o Anexo V.</p>
+      <p class="ajuda">Prejuízo fiscal só nasce em meses apurados no Lucro Real e compensa até 30% do lucro de cada mês seguinte. O prejuízo que o comparativo simula para o Real, com a empresa em outro regime, não é compensável.</p>
     </div>
     <div class="bloco"><header><h3>Comparativo do ano ${anoAtual + 1}</h3><span class="chip ouro">mesma operação, três regimes</span></header>
       <div class="tab-wrap"><table>
@@ -359,7 +418,7 @@ function abaImpostos() {
       </table></div>
       <p class="ajuda">Inclui a contribuição patronal sobre a folha, que muda de um regime para outro. Não inclui a diferença de honorários do contador.</p>
     </div>` : '<div class="bloco"><p class="ajuda">Feche o primeiro mês para ver os tributos apurados e o comparativo entre regimes.</p></div>'}
-    <div class="bloco"><h3>Regras do jogo</h3><p class="ajuda">Alíquotas do Simples pelas tabelas da LC 123/2006. ICMS, ISS, PIS/COFINS e IRPJ/CSLL simplificados: apuração mensal, sem substituição tributária, sem IPI e sem o sublimite estadual. A transição para IBS e CBS da reforma tributária ainda não está no jogo.</p></div>
+    <div class="bloco"><h3>Regras do jogo</h3><p class="ajuda">Alíquotas do Simples pelas tabelas da LC 123/2006 (Anexos I, II, III e V). Se a receita do ano passar do sublimite de R$ 3,6 milhões, ICMS e ISS saem do DAS e passam a ser pagos por fora: no ano seguinte, ou já no mês seguinte se passar de R$ 4,32 milhões. Na 6ª faixa (RBT12 acima de R$ 3,6 mi), enquanto a empresa não está impedida, ICMS e ISS seguem no DAS calculados pela 5ª faixa. Acima do limite de R$ 4,8 milhões no ano a empresa sai do Simples em janeiro, ou no mês seguinte se passar de R$ 5,76 milhões. PIS/COFINS da indústria sem o ICMS na base (Tema 69 do STF). ICMS, ISS e IRPJ/CSLL simplificados: apuração mensal, sem substituição tributária e sem IPI. A transição para IBS e CBS da reforma tributária ainda não está no jogo.</p></div>
   </div>`;
 }
 
@@ -382,7 +441,7 @@ function abaRelatorios() {
         ${linha('Receita bruta de vendas', x => x.receita, '', false)}
         ${linha('(−) Tributos sobre vendas', x => x.tribVenda)}
         ${linha('= Receita líquida', x => x.receita - x.tribVenda, 'total', false)}
-        ${linha('(−) Custo das mercadorias e materiais', x => x.cmv)}
+        ${linha(SEG(S).estocavel ? '(−) Custo dos produtos vendidos' : SEG(S).tipo === 'servico' ? '(−) Custo direto dos serviços' : '(−) Custo das mercadorias vendidas', x => x.cmv)}
         ${linha('= Lucro bruto', x => x.receita - x.tribVenda - x.cmv, 'total', false)}
         ${linha('(−) Salários', x => x.folha)}
         ${linha('(−) Encargos sobre a folha', x => x.encargos)}
@@ -401,6 +460,7 @@ function abaRelatorios() {
     </div>
     <div class="bloco"><h3>Fluxo de caixa de ${am.mes.toLowerCase()}</h3>
       <div class="tab-wrap"><table>
+        <tr><td>Caixa no início do mês</td><td class="${sinal(iniDFC(h))}">${brl(iniDFC(h))}</td></tr>
         <tr><td>Recebimentos de clientes</td><td class="pos">${brl(h.entradas)}</td></tr>
         <tr><td>Pagamentos da operação, tributos e juros</td><td class="neg">${brl(-(h.saidas - h.amort))}</td></tr>
         <tr><td>Amortização de empréstimos</td><td>${brl(-h.amort - h.quitado)}</td></tr>
@@ -409,7 +469,8 @@ function abaRelatorios() {
         <tr><td>Lucros distribuídos</td><td>${brl(-h.distribuido)}</td></tr>
         <tr class="total"><td>Caixa no fim do mês</td><td class="${sinal(h.caixa)}">${brl(h.caixa)}</td></tr>
       </table></div>
-      <p class="ajuda">Lucro e caixa são coisas diferentes: venda a prazo vira lucro hoje e dinheiro depois; equipamento sai do caixa hoje e vira despesa aos poucos, pela depreciação.</p>
+      ${h.financiado ? `<p class="ajuda">Equipamento financiado direto ao fornecedor: ${brl(h.financiado)}. Não passou pelo caixa: entrou no imobilizado e na dívida ao mesmo tempo.</p>` : ''}
+      <p class="ajuda">Lucro e caixa são coisas diferentes: venda a prazo vira lucro hoje e dinheiro depois; equipamento sai do caixa hoje e vira despesa aos poucos, pela depreciação.${SEG(S).estocavel ? ' Na confecção, o salário da fábrica entra no custo de cada peça e só vai para o resultado quando ela é vendida (custeio por absorção): a folha sai do caixa no mês, mas parte dela fica no estoque.' : ''}</p>
     </div>
     <div class="bloco"><h3>Histórico</h3>
       <div class="tab-wrap"><table>
@@ -420,10 +481,16 @@ function abaRelatorios() {
   </div>`;
 }
 
+// Jogos salvos antes da linha de caixa inicial: reconstroi pelo proprio mes.
+function iniDFC(h) {
+  return h.caixaIni ?? h.caixa - (h.entradas - h.saidas - h.quitado - h.investido + h.captado - h.distribuido);
+}
+
 /* ---- abertura ---- */
 function telaAbertura() {
   const seg = SEGMENTOS[setup.segmento];
   const inicial = setup.capital - seg.setup + setup.emprestimo;
+  const fixo = custoFixoInicial(), folego = inicial / fixo;
   return `<div class="stack abertura">
     <div class="topo"><div><p class="rot">Jogo de gestão</p><h1>Negócio Próprio</h1></div><div class="carimbo">Abertura<b>CNPJ novo</b></div></div>
     <p class="lead">Abra uma empresa, decida preço, equipe, produção, marketing, crédito e regime tributário, e veja o resultado no DRE e no caixa a cada mês. São ${DURACAO} meses para fazer o negócio dar certo, ou quebrar tentando.</p>
@@ -442,9 +509,19 @@ function telaAbertura() {
       ${REGIMES.map(r => `<label class="opcao"><input type="radio" name="regime" value="${r}" ${setup.regime === r ? 'checked' : ''}><b>${NOME_REGIME[r]}</b><span>Contador: ${brl(HONORARIOS[r])}/mês</span></label>`).join('')}
     </div><p class="ajuda">Dá para trocar todo mês de janeiro. A aba Impostos mostra quanto você pagaria em cada regime.</p></div>
     <div class="bloco"><div class="row between"><div><span class="rot">Caixa inicial</span><div class="grande ${inicial < 0 ? 'neg' : ''}">${brl(inicial)}</div></div>
-      <button class="fechar" data-acao="iniciar" ${inicial < 5000 ? 'disabled' : ''}>Abrir a empresa →</button></div>
-      ${inicial < 5000 ? '<p class="small neg">O capital não cobre o investimento inicial. Escolha mais capital ou um empréstimo.</p>' : ''}</div>
+      <button class="fechar" data-acao="iniciar" ${folego < 1 ? 'disabled' : ''}>Abrir a empresa →</button></div>
+      <p class="small ${folego < 1 ? 'neg' : 'muted'}">Custos fixos do primeiro mês: cerca de ${brl(fixo)}. ${folego < 1 ? 'O caixa não paga nem um mês: escolha mais capital ou um empréstimo.' : `O caixa cobre ${folego.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mês(es) sem vender nada.`}</p></div>
   </div>`;
+}
+
+// Quanto o caixa cai no primeiro mes sem nenhuma venda, pelo proprio motor: entram folha, encargos,
+// CPP fora do Simples, honorarios do regime escolhido e a parcela e os juros do Pronampe.
+function custoFixoInicial() {
+  const s = novoJogo({ ...setup });
+  s.mercadoMult = 0;
+  const antes = s.caixa;
+  fecharMes(s, () => 0.5);
+  return antes - s.caixa;
 }
 
 /* ---- modal ---- */
@@ -478,13 +555,13 @@ function conteudoModal() {
   }
   if (modal.tipo === 'fim') {
     const quebrou = S.fim === 'falencia';
-    const rq = riquezaDono(S), mult = rq / S.capitalInicial;
+    const rq = riquezaDono(S), mult = multiploNota(S);
     const tributos = soma(S.hist, x => x.tributos);
     return `<p class="rot">${quebrou ? 'Fim de jogo' : `Fim do ano ${DURACAO / 12}`}</p>
       <h2>${quebrou ? `${esc(S.nome)} fechou as portas` : `${esc(S.nome)} chegou ao fim do ano ${DURACAO / 12}`}</h2>
-      <p>${quebrou ? `O caixa ficou negativo além do que o banco aceitava. A empresa durou ${S.mes} meses.` : `Você colocou ${brl(S.capitalInicial)} no negócio. Somando pró-labore, lucros recebidos e a sua parte no valor da empresa, saiu com ${brl(rq)}.`}</p>
+      <p>${quebrou ? `O caixa ficou negativo além do que o banco aceitava. A empresa durou ${S.mes} meses.` : `Você colocou ${brl(S.capitalInicial)} no negócio e saiu com ${brl(rq)}, somando pró-labore líquido, lucros recebidos e a sua parte no valor da empresa: ganho de ${brl(rq - S.capitalInicial)}.`}</p>
       <div class="row"><span class="carimbo nota">Nota<b>${notaFinal(S)}</b></span>
-        <div class="small muted">${quebrou ? '' : `${mult.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}× o capital investido`}</div></div>
+        <div class="small muted">${quebrou ? '' : `${fmtMultiplo(mult)} (1 + ganho ÷ ${brl(CAPITAL_REFERENCIA)}; ${REGUA})`}</div></div>
       <div class="kpis">${kpi('Receita total', brlK(soma(S.hist, x => x.receita)))}${kpi('Lucro acumulado', brlK(S.lucroAcum), sinal(S.lucroAcum))}${kpi('Tributos pagos', brlK(tributos))}${kpi('Empregos', S.func.producao + S.func.comercial + S.func.adm)}</div>
       <div class="stack apertada">
         ${quebrou ? '' : '<button class="btn prim" data-acao="continuar">Continuar jogando</button>'}
@@ -499,7 +576,7 @@ function conteudoModal() {
 
 function posFechamento() {
   if (S.evento) modal = { tipo: 'evento' };
-  else if (S.fim && !S.modoLivre) modal = { tipo: 'fim' };
+  else if (jogoEncerrado(S)) modal = { tipo: 'fim' };
   else modal = null;
 }
 
@@ -517,13 +594,15 @@ function aoDigitar(ev) {
   if (t.id === 'nome-empresa') { setup.nome = t.value; return; }
   if (!S || !t.dataset.campo) return;
   const campo = t.dataset.campo;
-  const v = parseFloat(t.value);
+  let v = parseFloat(t.value);
+  if (campo === 'proLabore') v = Math.max(SALARIO_MINIMO, v);
   S.dec[campo] = campo === 'producao' ? Math.round(v) : v;
   const out = app.querySelector(`[data-ver="${campo}"]`);
   if (out) out.textContent = fmtCampo(campo, v);
-  if (campo === 'preco') {
-    const a = app.querySelector('[data-ajuda="preco"]');
-    if (a) a.textContent = textoPreco();
+  const ajudas = { preco: textoPreco, proLabore: textoProLabore, distribuir: textoDistribuir };
+  if (ajudas[campo]) {
+    const a = app.querySelector(`[data-ajuda="${campo}"]`);
+    if (a) a.textContent = ajudas[campo]();
   }
   const p = document.getElementById('previsao');
   if (p) p.innerHTML = textoPrevisao();
@@ -532,11 +611,12 @@ function aoDigitar(ev) {
     const btn = app.querySelector(`[data-acao="${alvo[0]}"]`);
     if (btn) { btn.textContent = alvo[1] + brl(v); btn.disabled = v < 1000; }
   }
-  salvar();
 }
 
 function aoMudar(ev) {
   const t = ev.target;
+  // o slider grava quando o dedo solta (change), e nao a cada passo do arraste (input)
+  if (S && t.type === 'range') { salvar(); return; }
   if (t.type !== 'radio') return;
   if (!S) {
     setup[t.name] = ['capital', 'emprestimo'].includes(t.name) ? +t.value : t.value;
@@ -544,6 +624,7 @@ function aoMudar(ev) {
     return;
   }
   if (t.name === 'prazo') S.dec.prazo = t.value === '1';
+  if (t.name === 'producaoAuto') S.dec.producaoAuto = t.value === '1';
   if (t.name === 'politica') S.dec.politica = t.value;
   if (t.name === 'regime') trocarRegime(S, t.value);
   salvar();
@@ -565,7 +646,7 @@ function aoClicar(ev) {
   if (st && b.dataset.passo) {
     const setor = st.dataset.setor;
     S.dec.func[setor] = clamp(S.dec.func[setor] + +b.dataset.passo, setor === 'producao' ? 1 : 0, 99);
-    if (SEG(S).estocavel && setor === 'producao') S.dec.producao = capacidades(S, S.dec.func).capacidade;
+    if (SEG(S).estocavel && setor === 'producao') S.dec.producao = Math.min(S.dec.producao, capacidades(S, S.dec.func).capacidade);
     salvar();
     render();
     return;
@@ -593,7 +674,7 @@ function aoClicar(ev) {
     }
     case 'ok-aviso':
     case 'fechar-modal':
-      modal = S && S.fim && !S.modoLivre ? { tipo: 'fim' } : null;
+      modal = S && jogoEncerrado(S) ? { tipo: 'fim' } : null;
       return render();
     case 'continuar': S.modoLivre = true; modal = null; return fim();
     case 'novo':
@@ -624,7 +705,11 @@ function aoClicar(ev) {
       const r = distribuirLucros(S, S.dec.distribuir);
       if (r.ok) {
         S.dec.distribuir = 0;
-        aviso('Lucros distribuídos', `${brl(r.liquido)} foram para você${r.irrf ? ` (retenção de ${brl(r.irrf)} de IR)` : ', sem imposto'}.`);
+        const inv = r.investidor > 0 ? ` ${brl(r.investidor)} foram para o investidor (${pct(1 - S.participacao)} da empresa).` : '';
+        const texto = r.liquido < 0
+          ? `Com esta parcela, o que você recebeu no mês passou de ${brl(LIMITE_ISENCAO_DIVIDENDOS)}, e a retenção de 10% passou a valer sobre o total do mês: ${brl(r.irrf)} a mais. Esta parcela não cobriu a retenção.`
+          : `${brl(r.liquido)} foram para você${r.irrf ? ` (retenção de ${brl(r.irrf)} de IR, que volta no ajuste anual se sua renda do ano ficar abaixo de R$ 600 mil)` : ', sem imposto'}.`;
+        aviso('Lucros distribuídos', texto + inv);
       } else aviso('Não foi possível', r.msg);
       return fim();
     }
@@ -635,9 +720,10 @@ function aoClicar(ev) {
 // Devolve true quando tratou o gesto.
 export function voltar() {
   if (modal) {
-    if (modal.tipo === 'evento' || modal.tipo === 'fim') return true; // exige escolha
+    // acontecimento e fim de jogo estao salvos e voltam ao reabrir: o voltar pode sair do app
+    if (modal.tipo === 'evento' || modal.tipo === 'fim') return false;
     if (modal.tipo === 'resultado') posFechamento();
-    else modal = S && S.fim && !S.modoLivre ? { tipo: 'fim' } : null;
+    else modal = S && jogoEncerrado(S) ? { tipo: 'fim' } : null;
     render();
     return true;
   }
@@ -653,10 +739,10 @@ export async function iniciarApp(raiz) {
   document.addEventListener('click', aoClicar);
   const salvo = await carregarJogo();
   if (salvo && salvo.S) {
-    S = salvo.S;
+    S = migrarEstado(salvo.S);
     aba = ABAS.includes(salvo.aba) ? salvo.aba : 'painel';
   }
-  if (S && S.fim && !S.modoLivre) modal = { tipo: 'fim' };
+  if (S && jogoEncerrado(S)) modal = { tipo: 'fim' };
   else if (S && S.evento) modal = { tipo: 'evento' };
   render();
 }

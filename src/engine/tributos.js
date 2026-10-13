@@ -1,4 +1,6 @@
-import { ANEXOS, HONORARIOS, FATOR_R_MINIMO, SUBLIMITE } from './regras.js';
+import {
+  ANEXOS, HONORARIOS, FATOR_R_MINIMO, SUBLIMITE, PARTILHA_LOCAL, TETO_ISS_DAS, ENCARGOS_FOLHA, TETO_INSS,
+} from './regras.js';
 import { pct } from './formato.js';
 
 // Aliquota efetiva do Simples: (RBT12 x aliquota nominal - parcela a deduzir) / RBT12.
@@ -7,6 +9,12 @@ export function aliqEfetiva(anexo, rbt12) {
   if (rbt12 <= 0) return t[0][1];
   const f = t.find(x => rbt12 <= x[0]) || t[t.length - 1];
   return Math.max(0, (rbt12 * f[1] - f[2]) / rbt12);
+}
+
+// Indice da faixa (0 a 5) em que o RBT12 cai.
+export function faixaSimples(anexo, rbt12) {
+  const i = ANEXOS[anexo].findIndex(x => rbt12 <= x[0]);
+  return i < 0 ? ANEXOS[anexo].length - 1 : i;
 }
 
 export function anexoSimples(tipo, fatorR) {
@@ -31,43 +39,74 @@ function tributosLocais(seg, op, det, sufixo = '') {
   return total;
 }
 
+function apurarSimples(seg, op, det) {
+  const anexo = anexoSimples(seg.tipo, op.fatorR);
+  const faixa = Math.min(4, faixaSimples(anexo, op.rbt12));
+  const teto = seg.iss ? TETO_ISS_DAS : 1;
+  let aliq = aliqEfetiva(anexo, op.rbt12);
+  // Impedida de recolher ICMS/ISS no Simples com RBT12 ate R$ 3,6 mi: tira a parcela local do DAS,
+  // que passa a ser paga por fora (na 6a faixa a reparticao ja nao tem ICMS/ISS).
+  if (op.impedidoSublimite && op.rbt12 <= SUBLIMITE) aliq -= Math.min(teto, aliq * PARTILHA_LOCAL[anexo][faixa]);
+  let total = op.receita * aliq;
+  det.push({ nome: `DAS — Anexo ${anexo} (alíquota efetiva ${pct(aliq, 2)})`, valor: total });
+  if (op.impedidoSublimite) {
+    total += tributosLocais(seg, op, det, ' — fora do DAS (sublimite)');
+  } else if (op.rbt12 > SUBLIMITE) {
+    // 6a faixa sem impedimento: ICMS/ISS seguem no DAS calculados pela 5a faixa (Res. CGSN 140, art. 21, III, b).
+    const f = ANEXOS[anexo][4];
+    const ef5 = (op.rbt12 * f[1] - f[2]) / op.rbt12;
+    const local = op.receita * Math.min(teto, ef5 * PARTILHA_LOCAL[anexo][4]);
+    det.push({ nome: `${seg.icms ? 'ICMS' : 'ISS'} no DAS (pela 5ª faixa)`, valor: local });
+    total += local;
+  }
+  return { anexo, aliq, tribVenda: total };
+}
+
+function apurarPisCofins(regime, seg, op, det) {
+  const naoCumulativo = regime === 'real' && !seg.pisCofinsCumulativo;
+  // ICMS destacado fora da base do PIS/COFINS (STF, Tema 69) e da base do credito (Lei 14.592/2023).
+  const icmsDestacado = seg.icms && seg.icms.credito ? seg.icms.aliq : 0;
+  const base = op.receita * (1 - icmsDestacado);
+  const sobre = icmsDestacado ? ' sobre a receita sem ICMS' : '';
+  let pis = base * (naoCumulativo ? 0.0165 : 0.0065);
+  let cofins = base * (naoCumulativo ? 0.076 : 0.03);
+  if (naoCumulativo) {
+    const credito = op.compras * (seg.creditoCompras ?? 1) * (1 - icmsDestacado) + op.aluguel + op.utilidades + op.depreciacao;
+    pis = Math.max(0, pis - credito * 0.0165);
+    cofins = Math.max(0, cofins - credito * 0.076);
+    det.push({ nome: `PIS não cumulativo (1,65%${sobre} − créditos)`, valor: pis });
+    det.push({ nome: `COFINS não cumulativa (7,6%${sobre} − créditos)`, valor: cofins });
+  } else {
+    const nota = regime === 'real' ? ', regime do software' : '';
+    det.push({ nome: `PIS cumulativo (0,65%${sobre}${nota})`, valor: pis });
+    det.push({ nome: `COFINS cumulativa (3%${sobre}${nota})`, valor: cofins });
+  }
+  return pis + cofins;
+}
+
 // Apura os tributos do mes num regime. Nao altera o estado: devolve o prejuizo fiscal novo.
 //
 // op: { seg, receita, compras, cmv, folha, proLabore, despesas, aluguel, utilidades,
-//       depreciacao, juros, rbt12, fatorR }
+//       depreciacao, juros, rbt12, fatorR, impedidoSublimite, absorvido }
+// `absorvido` e a parte da folha da fabrica que foi para o estoque (custeio por absorcao): saiu
+// do caixa, mas so vira resultado quando a peca e vendida (e ai esta dentro do cmv).
 export function apurar(regime, op, prejuizoAnt) {
   const seg = op.seg;
   const det = [];
   const contador = HONORARIOS[regime];
-  const encargos = op.folha * 0.30; // FGTS + provisao de 13o e ferias
+  const encargos = op.folha * ENCARGOS_FOLHA;
   let cpp = 0, anexo = null, aliq = null, tribVenda = 0, prejuizo = prejuizoAnt;
 
   if (regime === 'simples') {
-    anexo = anexoSimples(seg.tipo, op.fatorR);
-    aliq = aliqEfetiva(anexo, op.rbt12);
-    tribVenda = op.receita * aliq;
-    det.push({ nome: `DAS — Anexo ${anexo} (alíquota efetiva ${pct(aliq, 2)})`, valor: tribVenda });
-    // Acima do sublimite (6a faixa) a reparticao do DAS nao tem ICMS/ISS: os dois passam a ser
-    // recolhidos por fora, pelas regras normais. Sem isso, crescer alem de R$ 3,6 mi baixaria o tributo.
-    if (op.rbt12 > SUBLIMITE) tribVenda += tributosLocais(seg, op, det, ' — fora do DAS (sublimite)');
+    ({ anexo, aliq, tribVenda } = apurarSimples(seg, op, det));
   } else {
     cpp = op.folha * 0.278 * 1.2 + op.proLabore * 0.20;
-    const real = regime === 'real';
-    let pis = op.receita * (real ? 0.0165 : 0.0065);
-    let cofins = op.receita * (real ? 0.076 : 0.03);
-    if (real) {
-      const base = op.compras + op.aluguel + op.utilidades + op.depreciacao;
-      pis = Math.max(0, pis - base * 0.0165);
-      cofins = Math.max(0, cofins - base * 0.076);
-    }
-    det.push({ nome: real ? 'PIS não cumulativo (1,65% − créditos)' : 'PIS cumulativo (0,65%)', valor: pis });
-    det.push({ nome: real ? 'COFINS não cumulativa (7,6% − créditos)' : 'COFINS cumulativa (3%)', valor: cofins });
-    tribVenda = pis + cofins + tributosLocais(seg, op, det);
+    tribVenda = apurarPisCofins(regime, seg, op, det) + tributosLocais(seg, op, det);
     det.push({ nome: 'INSS patronal + RAT + terceiros', valor: cpp });
   }
 
   const lucroAntesIR = op.receita - tribVenda - op.cmv - op.folha - encargos - cpp - op.proLabore
-    - op.despesas - contador - op.depreciacao - op.juros;
+    - op.despesas - contador - op.depreciacao - op.juros + (op.absorvido || 0);
 
   let irpj = 0, csll = 0;
   if (regime === 'presumido') {
@@ -98,3 +137,20 @@ export function apurar(regime, op, prejuizoAnt) {
     lucro: lucroAntesIR - irpj - csll, det, prejuizo, totalTributos: tribVenda + cpp + irpj + csll,
   };
 }
+
+// --- Pessoa fisica do socio ---
+
+// IRRF mensal sobre o pro-labore em 2026: tabela progressiva com desconto simplificado e a
+// reducao da Lei 15.270/2025 (isencao ate R$ 5 mil, reducao gradual ate R$ 7.350).
+const TABELA_IRRF = [[2428.80, 0, 0], [2826.65, 0.075, 182.16], [3751.05, 0.15, 394.16], [4664.68, 0.225, 675.49], [Infinity, 0.275, 908.73]];
+
+export function inssSocio(bruto) { return Math.min(bruto, TETO_INSS) * 0.11; }
+
+export function irrfProLabore(bruto) {
+  const base = bruto - Math.max(inssSocio(bruto), 607.20);
+  const [, aliq, parcela] = TABELA_IRRF.find(f => base <= f[0]);
+  const reducao = bruto <= 5000 ? 312.89 : bruto <= 7350 ? 978.62 - 0.133145 * bruto : 0;
+  return Math.max(0, Math.round((base * aliq - parcela - Math.max(0, reducao)) * 100) / 100);
+}
+
+export function liquidoProLabore(bruto) { return bruto - inssSocio(bruto) - irrfProLabore(bruto); }
