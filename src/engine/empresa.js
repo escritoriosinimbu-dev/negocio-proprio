@@ -1,6 +1,6 @@
 import {
   SEGMENTOS, POLITICA, SETORES, CAPITAL_REFERENCIA, ENCARGOS_FOLHA, SALARIO_MINIMO, LIMITE_SIMPLES, TOLERANCIA_EXCESSO,
-  LIMITE_ISENCAO_DIVIDENDOS, ALIQ_RETENCAO_DIVIDENDOS,
+  LIMITE_ISENCAO_DIVIDENDOS, ALIQ_RETENCAO_DIVIDENDOS, HONORARIOS, SELIC_INICIAL, SPREAD_GIRO, SPREAD_PRONAMPE,
 } from './regras.js';
 import { liquidoProLabore } from './tributos.js';
 
@@ -11,7 +11,7 @@ export const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 export const soma = (arr, f) => arr.reduce((t, x) => t + f(x), 0);
 export const SEG = s => SEGMENTOS[s.segmento];
 
-export const VERSAO_ESTADO = 2;
+export const VERSAO_ESTADO = 3;
 
 export function novoJogo({ nome, segmento, capital, emprestimo, regime }) {
   const seg = SEGMENTOS[segmento];
@@ -24,12 +24,24 @@ export function novoJogo({ nome, segmento, capital, emprestimo, regime }) {
       qualidade: Math.round(seg.qEscala * 0.4 / 100) * 100, producao: 0, producaoAuto: true, proLabore: 3000,
       politica: 'mercado', prazo: false, func: { ...seg.funcInicial },
       emprestimo: 0, distribuir: 0,
+      // preco fixo ou recalculado todo mes pela margem de contribuicao desejada
+      modoPreco: 'preco', margemAlvo: 0.4, seguro: false,
     },
     precoRef: seg.precoRef, custoMat: seg.custoMat,
     equipNivel: 0, espacoNivel: 0, expansoes: [], mercadoMult: 1, aluguelExtra: 0,
     imobilizado: seg.setup, deprecAcum: 0, estoque: 0, valorEstoque: 0,
-    A: 10, Q: 50, M: 65, economia: 1, ajusteJuros: 0,
-    emprestimos: emprestimo > 0 ? [{ nome: 'Pronampe', saldo: emprestimo, taxa: 0.016, amort: emprestimo / 36 }] : [],
+    A: 10, Q: 50, M: 65, economia: 1, selic: SELIC_INICIAL, selicTendencia: 0, indice: 1,
+    // fatia da procura tomada por concorrentes que entraram no mercado (cresce com o sucesso)
+    concorrencia: 0,
+    // clientes da carteira (ramos recorrentes)
+    carteira: seg.carteiraInicial || 0,
+    // contrato de fornecimento com preco travado: { ate, minimo }
+    contratoFornecedor: null,
+    // contrato de fornecimento para um grande cliente: { qtd, preco, ate }
+    contratoCliente: null,
+    // fornecedor alternativo mais barato, com risco de falhar a entrega
+    fornecedorArriscado: false,
+    emprestimos: emprestimo > 0 ? [{ nome: 'Pronampe', saldo: emprestimo, taxa: taxaPronampe(SELIC_INICIAL), amort: emprestimo / 36, posFixado: true }] : [],
     recebiveis: [], pedidos: [], efeitos: [], extras: 0, salExtra: 0,
     prejuizo: { simples: 0, presumido: 0, real: 0 },
     hist: [], negativos: 0, fim: null, evento: null, modoLivre: false,
@@ -46,9 +58,22 @@ export function novoJogo({ nome, segmento, capital, emprestimo, regime }) {
   return s;
 }
 
-export function efeito(s, tipo) {
-  return s.efeitos.filter(e => e.tipo === tipo && e.ate > s.mes).reduce((m, e) => m * e.mult, 1);
+// Efeitos temporarios: valem do mes `de` (inclusive; ausente = ja vale) ate antes de `ate`.
+export function efeito(s, tipo, mes = s.mes) {
+  return s.efeitos.filter(e => e.tipo === tipo && e.ate > mes && (e.de ?? -Infinity) <= mes).reduce((m, e) => m * e.mult, 1);
 }
+
+// Preco medio cobrado pelo mercado (guerras de preco o derrubam por um tempo).
+export function precoMercado(s) { return s.precoRef * efeito(s, 'precoMercado'); }
+
+// Preco que o cliente acha justo pelo que recebe: qualidade e reputacao deixam cobrar mais.
+// Com qualidade e reputacao 50, e o preco de mercado.
+export function precoJusto(s) {
+  return precoMercado(s) * (0.85 + 0.3 * s.Q / 100) * (0.94 + 0.12 * s.A / 100);
+}
+
+// Depois do nivel 5, cada nivel de equipamento rende metade.
+export function nivelEfetivo(n) { return Math.min(n, 5) + 0.5 * Math.max(0, n - 5); }
 
 export function capacidades(s, func = s.func) {
   const seg = SEG(s);
@@ -58,7 +83,7 @@ export function capacidades(s, func = s.func) {
   const capEspaco = 10 + 10 * s.espacoNivel;
   const apertado = total > capEspaco;
   const moral = 0.7 + 0.45 * s.M / 100;
-  const fator = moral * (1 + seg.ganhoEquip * s.equipNivel) * (desorg ? 0.9 : 1) * (apertado ? 0.85 : 1) * efeito(s, 'producao');
+  const fator = moral * (1 + seg.ganhoEquip * nivelEfetivo(s.equipNivel)) * (desorg ? 0.9 : 1) * (apertado ? 0.85 : 1) * efeito(s, 'producao');
   return {
     capacidade: Math.floor(func.producao * seg.prodPorFunc * fator),
     cobertura: Math.floor((seg.capDono + func.comercial * seg.capVenda * moral) * (desorg ? 0.9 : 1)),
@@ -66,11 +91,20 @@ export function capacidades(s, func = s.func) {
   };
 }
 
-export function demandaEsperada(s, d = s.dec) {
+// Procura que o mercado oferece neste mes. O preco e comparado com o preco justo (qualidade e
+// reputacao); a reputacao tambem decide quanta gente conhece a marca.
+export function procuraDoMercado(s, d = s.dec) {
   const seg = SEG(s);
-  const atracao = (0.15 + 0.85 * s.A / 100) * (0.7 + 0.6 * s.Q / 100);
-  return seg.mercado * s.mercadoMult * Math.pow(s.precoRef / d.preco, seg.elasticidade) * atracao
-    * seg.sazonal[s.mes % 12] * s.economia * (d.prazo ? 1.15 : 1) * efeito(s, 'demanda');
+  const conhecem = 0.15 + 0.85 * s.A / 100;
+  return seg.mercado * s.mercadoMult * Math.pow(precoJusto(s) / d.preco, seg.elasticidade) * conhecem
+    * seg.sazonal[s.mes % 12] * s.economia * (d.prazo ? 1.15 : 1) * efeito(s, 'demanda') * (1 - s.concorrencia);
+}
+
+// Procura esperada do mes. Nos ramos de carteira (recorrente), quem ja e cliente fica e a procura
+// anda so uma parte do caminho ate a do mercado: ganhar e perder clientes leva meses.
+export function demandaEsperada(s, d = s.dec) {
+  const alvo = procuraDoMercado(s, d), r = SEG(s).recorrente;
+  return r ? s.carteira + (alvo - s.carteira) * r : alvo;
 }
 
 // Plano automatico da industria: procura prevista + 5% + pedidos especiais - estoque.
@@ -78,13 +112,67 @@ export function planoProducaoAuto(s) {
   return Math.max(0, Math.round((demandaEsperada(s) * 1.05 + soma(s.pedidos, p => p.qtd) - s.estoque) / 10) * 10);
 }
 
-export function salario(seg, setor, politica) {
-  return { producao: seg.salProd, comercial: seg.salCom, adm: seg.salAdm }[setor] * POLITICA[politica].fator;
+// Indice de reajuste acumulado (salarios, aluguel, honorarios): sobe todo janeiro.
+export const indice = s => s.indice || 1;
+
+export function salario(seg, setor, politica, idx = 1) {
+  return { producao: seg.salProd, comercial: seg.salCom, adm: seg.salAdm }[setor] * POLITICA[politica].fator * idx;
+}
+
+export function aluguelMes(s) {
+  const seg = SEG(s);
+  return (seg.aluguel * (1 + 0.7 * s.espacoNivel) + s.aluguelExtra) * indice(s);
 }
 
 export function folhaPrevista(s, func = s.dec.func, politica = s.dec.politica) {
   const seg = SEG(s);
-  return soma(SETORES, setor => func[setor] * salario(seg, setor, politica)) + (func.producao > 0 ? s.salExtra : 0);
+  return soma(SETORES, setor => func[setor] * salario(seg, setor, politica, indice(s))) + (func.producao > 0 ? s.salExtra : 0);
+}
+
+// --- Margem e ponto de equilibrio (estimativas para a tela de preco) ---
+
+// Tributo sobre a venda como fracao da receita: o do ultimo mes, ou uma estimativa antes dele.
+export function aliqVendaEstimada(s) {
+  const h = s.hist.at(-1);
+  if (h && h.receita > 0) return h.tribVenda / h.receita;
+  return s.regime === 'simples' ? 0.06 : s.regime === 'presumido' ? 0.0365 + (SEG(s).iss || 0) : 0.07;
+}
+// Parte variavel de "outras despesas": energia, gas e taxas de cartao (2,5% da receita).
+export const DESPESA_VARIAVEL = 0.025;
+
+export function custoInsumoUnit(s) {
+  const seg = SEG(s);
+  return s.custoMat * (seg.tipo === 'comercio' && !seg.estocavel ? 1.06 : 1) / (1 - (seg.perecivel || 0));
+}
+
+// Quanto sobra de cada unidade vendida para pagar os custos fixos e dar lucro.
+export function margemContribuicao(s, preco = s.dec.preco) {
+  return preco * (1 - aliqVendaEstimada(s) - DESPESA_VARIAVEL) - custoInsumoUnit(s);
+}
+
+// Preco que da a margem de contribuicao desejada (fracao do preco).
+export function precoPelaMargem(s, margem = s.dec.margemAlvo) {
+  const livre = 1 - margem - aliqVendaEstimada(s) - DESPESA_VARIAVEL;
+  return Math.round(custoInsumoUnit(s) / Math.max(0.05, livre) * 100) / 100;
+}
+
+export function premioSeguro(s) {
+  return Math.round((150 + 0.003 * (s.imobilizado - s.deprecAcum + s.valorEstoque)) / 10) * 10;
+}
+
+// Custos que nao dependem do volume vendido, num mes tipico com as decisoes atuais.
+export function custosFixos(s) {
+  const d = s.dec, folha = folhaPrevista(s);
+  // fora do Simples, a contribuicao patronal (INSS, RAT e terceiros) sai por fora do DAS
+  const cpp = s.regime === 'simples' ? 0 : folha * 0.278 * 1.2 + d.proLabore * 0.2;
+  return folha * (1 + ENCARGOS_FOLHA) + cpp + d.proLabore + aluguelMes(s)
+    + d.marketing + d.qualidade + (HONORARIOS[s.regime] + 600) * indice(s) + (d.seguro ? premioSeguro(s) : 0)
+    + soma(s.emprestimos, e => e.saldo * e.taxa) + s.imobilizado / 120;
+}
+
+export function pontoEquilibrio(s, preco = s.dec.preco) {
+  const mc = margemContribuicao(s, preco);
+  return mc > 0 ? custosFixos(s) / mc : Infinity;
 }
 
 export function dividaTotal(s) { return soma(s.emprestimos, e => e.saldo); }
@@ -112,7 +200,11 @@ export function limiteCredito(s) {
   return Math.max(0, Math.floor((30000 + 1.5 * mediaReceita(s) - dividaTotal(s)) / 1000) * 1000);
 }
 
-export function taxaCapitalGiro(s) { return 0.024 + s.ajusteJuros + (patrimonio(s) < 0 ? 0.01 : 0); }
+export const selicMensal = selic => Math.pow(1 + selic, 1 / 12) - 1;
+// Capital de giro: prefixado na contratacao pela Selic do dia + spread.
+export function taxaCapitalGiro(s) { return selicMensal(s.selic) + SPREAD_GIRO + (patrimonio(s) < 0 ? 0.01 : 0); }
+// Pronampe: Selic + 6% ao ano, recalculado todo mes.
+export function taxaPronampe(selic) { return selicMensal(selic + SPREAD_PRONAMPE); }
 export function limiteCheque(s) { return 20000 + 0.5 * mediaReceita(s); }
 
 // O que o dono levou: pro-labore liquido de INSS e IRRF, lucros recebidos (liquidos de retencao)
@@ -172,6 +264,27 @@ export function migrarEstado(s) {
       s.excluidoSimples = receitaDoAno(ano - 1) > LIMITE_SIMPLES || receitaDoAno(ano) > LIMITE_SIMPLES * (1 + TOLERANCIA_EXCESSO);
     }
     s.v = 2;
+  }
+  if (s.v < 3) {
+    // v3: Selic variavel (a v2 tinha um ajuste fixo de juros), concorrencia, carteira, contratos e seguro
+    // o ajuste da v2 era somado a taxa mensal do capital de giro: x12 vira pontos ao ano
+    s.selic = clamp(Math.round((SELIC_INICIAL + (s.ajusteJuros || 0) * 12) * 400) / 400, 0.065, 0.2);
+    s.selicTendencia = 0;
+    delete s.ajusteJuros;
+    s.indice = 1;
+    s.concorrencia = 0;
+    s.carteira = 0;
+    s.contratoFornecedor = null;
+    s.contratoCliente = null;
+    s.fornecedorArriscado = false;
+    s.dec.modoPreco = 'preco';
+    s.dec.margemAlvo = 0.4;
+    s.dec.seguro = false;
+    // o Pronampe passou a ser pos-fixado (Selic + 6% ao ano)
+    for (const e of s.emprestimos) if (e.nome === 'Pronampe') e.posFixado = true;
+    // o acontecimento "juros" deixou de existir: a Selic agora anda sozinha
+    if (s.evento && s.evento.id === 'juros') s.evento = null;
+    s.v = 3;
   }
   return s;
 }

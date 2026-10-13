@@ -17,7 +17,9 @@ export function faixaSimples(anexo, rbt12) {
   return i < 0 ? ANEXOS[anexo].length - 1 : i;
 }
 
-export function anexoSimples(tipo, fatorR) {
+// anexoFixo: atividade com anexo definido em lei, sem Fator R (ex.: servicos contabeis no III).
+export function anexoSimples(tipo, fatorR, anexoFixo = null) {
+  if (anexoFixo) return anexoFixo;
   if (tipo === 'comercio') return 'I';
   if (tipo === 'industria') return 'II';
   return fatorR >= FATOR_R_MINIMO ? 'III' : 'V';
@@ -40,7 +42,7 @@ function tributosLocais(seg, op, det, sufixo = '') {
 }
 
 function apurarSimples(seg, op, det) {
-  const anexo = anexoSimples(seg.tipo, op.fatorR);
+  const anexo = anexoSimples(seg.tipo, op.fatorR, seg.anexoFixo);
   const faixa = Math.min(4, faixaSimples(anexo, op.rbt12));
   const teto = seg.iss ? TETO_ISS_DAS : 1;
   let aliq = aliqEfetiva(anexo, op.rbt12);
@@ -87,13 +89,14 @@ function apurarPisCofins(regime, seg, op, det) {
 // Apura os tributos do mes num regime. Nao altera o estado: devolve o prejuizo fiscal novo.
 //
 // op: { seg, receita, compras, cmv, folha, proLabore, despesas, aluguel, utilidades,
-//       depreciacao, juros, rbt12, fatorR, impedidoSublimite, absorvido }
+//       depreciacao, juros, rbt12, fatorR, impedidoSublimite, absorvido, perdas }
+// `perdas` sao baixas sem saida de caixa (cliente que nao pagou): reduzem o lucro.
 // `absorvido` e a parte da folha da fabrica que foi para o estoque (custeio por absorcao): saiu
 // do caixa, mas so vira resultado quando a peca e vendida (e ai esta dentro do cmv).
 export function apurar(regime, op, prejuizoAnt) {
   const seg = op.seg;
   const det = [];
-  const contador = HONORARIOS[regime];
+  const contador = HONORARIOS[regime] * (op.indice || 1);
   const encargos = op.folha * ENCARGOS_FOLHA;
   let cpp = 0, anexo = null, aliq = null, tribVenda = 0, prejuizo = prejuizoAnt;
 
@@ -106,7 +109,7 @@ export function apurar(regime, op, prejuizoAnt) {
   }
 
   const lucroAntesIR = op.receita - tribVenda - op.cmv - op.folha - encargos - cpp - op.proLabore
-    - op.despesas - contador - op.depreciacao - op.juros + (op.absorvido || 0);
+    - op.despesas - contador - op.depreciacao - op.juros + (op.absorvido || 0) - (op.perdas || 0);
 
   let irpj = 0, csll = 0;
   if (regime === 'presumido') {

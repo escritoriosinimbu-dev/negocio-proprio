@@ -10,10 +10,14 @@ export function semente(n = 1) {
 }
 
 // Estrategias simples de jogador, usadas nos testes e no script de balanceamento.
+// Parada: so reajusta o preco pelo mercado uma vez por ano. Ativa: acompanha o mercado todo mes.
 export const ESTRATEGIAS = {
-  parada: () => {},
+  parada: s => {
+    if (s.mes > 0 && s.mes % 12 === 0) s.dec.preco = Math.round(s.precoRef * 100) / 100;
+  },
   ativa: s => {
     const h = s.hist.at(-1), seg = SEG(s);
+    s.dec.preco = Math.round(s.precoRef * 100) / 100;
     if (h) {
       if (h.faltaAtend > h.demanda * 0.1) s.dec.func.comercial++;
       if (h.faltaProduto > h.demanda * 0.1) s.dec.func.producao++;
@@ -47,7 +51,14 @@ export function jogar({ segmento = 'hamburgueria', regime = 'simples', capital =
     const antes = structuredClone(s);
     const reg = fecharMes(s, rnd);
     if (aoFechar) aoFechar(s, reg, antes);
-    if (s.evento && resolver) resolverEvento(s, Math.floor(rnd() * s.evento.opcoes.length), rnd);
+    if (s.evento && resolver) {
+      // o regime de janeiro e decidido olhando o comparativo: a estrategia parada mantem, a ativa
+      // escolhe o mais barato. Os demais acontecimentos sao respondidos ao acaso.
+      const i = s.evento.id === 'regime'
+        ? (estrategia === 'ativa' ? s.evento.dados.melhor : 0)
+        : Math.floor(rnd() * s.evento.opcoes.length);
+      resolverEvento(s, i, rnd);
+    }
   }
   return s;
 }

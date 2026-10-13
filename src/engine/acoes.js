@@ -4,8 +4,8 @@ import { LIMITE_ISENCAO_DIVIDENDOS, ALIQ_RETENCAO_DIVIDENDOS } from './regras.js
 // Acoes imediatas do jogador (fora do fechamento do mes). Cada uma valida e devolve
 // { ok, msg }; nenhuma deixa o caixa negativo por conta propria.
 
-export const NIVEL_MAX_EQUIP = 5;
-export const NIVEL_MAX_ESPACO = 4;
+export const NIVEL_MAX_EQUIP = 8;
+export const NIVEL_MAX_ESPACO = 6;
 
 // O equipamento atende a equipe inteira: o preco cresce com o numero de pessoas na producao
 // (equipCusto equipa 3 pessoas). Sem isso, +20% de produtividade custava o mesmo para 3 ou 30.
