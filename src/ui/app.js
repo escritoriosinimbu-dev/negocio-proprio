@@ -212,7 +212,7 @@ function grafico() {
   let g = '';
   for (let v = min; v <= max + 1e-6; v += passo) {
     g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="${v === 0 ? 1.5 : 1}"/>`;
-    g += `<text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)" font-family="IBM Plex Mono, monospace">${brlK(v).replace('R$ ', '')}</text>`;
+    g += `<text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)" font-family="Inter, system-ui, sans-serif">${brlK(v).replace('R$ ', '')}</text>`;
   }
   hs.forEach((h, i) => {
     g += `<rect x="${x(i) - bw * 0.35}" y="${y(Math.max(0, h.receita))}" width="${bw * 0.7}" height="${Math.abs(y(h.receita) - y(0))}" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1"/>`;
@@ -580,7 +580,7 @@ function telaAbertura() {
   const inicial = setup.capital - seg.setup + setup.emprestimo;
   const fixo = custoFixoInicial(), folego = inicial / fixo;
   return `<div class="stack abertura">
-    <div class="topo"><div><p class="rot">Jogo de gestão</p><h1>Negócio Próprio</h1></div><div class="carimbo">Abertura<b>CNPJ novo</b></div></div>
+    <div class="topo"><div>${linkExterno(LINK_SITE, '<img src="marca/logo-escsin.jpg" alt="ESCSIN Contabilidade" width="60" height="30">', 'logo-escsin')}<p class="rot">Jogo de gestão</p><h1>Negócio Próprio</h1></div><div class="carimbo">Abertura<b>CNPJ novo</b></div></div>
     <p class="lead">Abra uma empresa, decida preço, equipe, produção, marketing, crédito e regime tributário, e veja o resultado no DRE e no caixa a cada mês. São ${DURACAO} meses para fazer o negócio dar certo, ou quebrar tentando.</p>
     <div class="bloco"><label for="nome-empresa"><b>Nome da empresa</b></label>
       <input type="text" id="nome-empresa" maxlength="40" value="${esc(setup.nome)}" autocomplete="off"></div>

@@ -70,6 +70,13 @@ escritório em **só três lugares**: tela final (abaixo da nota), fim do compar
 rodapé da abertura. Nada de pop-up nem chamada em outras telas. Endereços em `src/ui/externo.js`; no app, os links
 abrem fora da WebView pelo `@capacitor/app-launcher`.
 
+**Visual.** O jogo usa a identidade do escsin.com.br: tokens no topo de `src/ui/style.css` (azul-marinho `#1a1966`,
+laranja `#F5A21B`, fundo `#f7f8fc`; tema escuro com fundo `#0f0f2e`), Sora nos títulos e números de destaque e Inter
+no texto, servidas pelos pacotes `@fontsource` (nada de Google Fonts: o jogo roda offline e no APK). Laranja como
+**texto** sobre branco só em `#9c6200` (o `#F5A21B` não passa no contraste AA); verde e vermelho continuam só para
+lucro/prejuízo e alertas. O logo (`public/marca/logo-escsin.jpg`, fundo branco) fica no topo da abertura sobre um selo
+branco, com link para o site. Ícones e splash do app continuam os antigos (`#1C6A4B`), de propósito.
+
 ## Mecânicas da v0.2 (o que não é óbvio)
 
 1. **Preço justo.** `precoJusto` = preço de mercado × fator de qualidade × fator de reputação (os dois valem 1

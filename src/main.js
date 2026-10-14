@@ -1,12 +1,10 @@
-import '@fontsource/bricolage-grotesque/latin-500.css';
-import '@fontsource/bricolage-grotesque/latin-700.css';
-import '@fontsource/bricolage-grotesque/latin-800.css';
-import '@fontsource/figtree/latin-400.css';
-import '@fontsource/figtree/latin-500.css';
-import '@fontsource/figtree/latin-600.css';
-import '@fontsource/figtree/latin-700.css';
-import '@fontsource/ibm-plex-mono/latin-500.css';
-import '@fontsource/ibm-plex-mono/latin-600.css';
+// Fontes da identidade ESCSIN servidas pelo proprio app (offline e APK): Sora nos titulos e numeros
+// de destaque, Inter no texto. Os pacotes @fontsource trazem os .woff2 e usam font-display: swap.
+import '@fontsource/sora/latin-600.css';
+import '@fontsource/sora/latin-700.css';
+import '@fontsource/inter/latin-400.css';
+import '@fontsource/inter/latin-500.css';
+import '@fontsource/inter/latin-600.css';
 import './ui/style.css';
 
 import { Capacitor } from '@capacitor/core';
