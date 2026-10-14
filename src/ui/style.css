@@ -170,3 +170,10 @@ tr.destaque td { background: var(--accent-soft); }
 /* texto dos acontecimentos (a decisao do regime traz uma tabela) */
 .texto-evento { display: flex; flex-direction: column; gap: 10px; }
 .texto-evento table { width: 100%; }
+
+/* chamada da ESCSIN (so na tela final, no comparativo e no credito da abertura) */
+.cta-escsin { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.cta-escsin .btn { text-align: center; text-decoration: none; }
+.credito { text-align: center; }
+a[data-externo] { color: var(--accent); font-weight: 600; }
+.cta-escsin a.btn { display: block; color: var(--ink); }

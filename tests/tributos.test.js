@@ -120,7 +120,8 @@ describe('Lucro Presumido', () => {
 
   it('cobra INSS patronal sobre folha e pro-labore', () => {
     const r = apurar('presumido', op(), 0);
-    expect(r.cpp).toBeCloseTo(20000 * 0.278 * 1.2 + 3000 * 0.2, 6);
+    // 20% + RAT 2% + terceiros 5,8% sobre salario e provisoes de 13o e ferias + 1/3; 20% sobre o pro-labore
+    expect(r.cpp).toBeCloseTo(20000 * 0.278 * (1 + 1 / 12 + 1 / 9) + 3000 * 0.2, 6);
   });
 
   it('ICMS com credito na industria e sem credito no regime de restaurante', () => {

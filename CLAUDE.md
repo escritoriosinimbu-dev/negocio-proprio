@@ -50,7 +50,7 @@ LC 155/2016). Fatos que não são óbvios e que já custaram um erro:
 2. **6ª faixa sem impedimento.** Com RBT12 acima de R$ 3,6 mi e a empresa ainda não impedida, o ICMS/ISS
    continua no DAS, calculado pela 5ª faixa (Res. CGSN 140, art. 21, III, b). A alíquota efetiva da 6ª
    faixa é menor que a da 5ª justamente porque a repartição dela não tem ICMS/ISS.
-3. **Fator R** = salários, 13º, férias e FGTS (a folha × 1,30 de `ENCARGOS_FOLHA`) + pró-labore, que não
+3. **Fator R** = salários, 13º, férias e FGTS (a folha × (1 + `ENCARGOS_FOLHA`)) + pró-labore, que não
    tem FGTS. Usar só salário + pró-labore jogava o software no Anexo V sem motivo.
 4. **Comparativo x Lalur.** Os três regimes são apurados todo mês sobre a mesma operação (`comp` no
    histórico) e `s.prejuizo[regime]` é o prejuízo *simulado* de cada um. O prejuízo fiscal de verdade é
@@ -58,6 +58,17 @@ LC 155/2016). Fatos que não são óbvios e que já custaram um erro:
 5. **Dividendos (Lei 15.270/2025).** A retenção de 10% incide sobre o total do mês da pessoa, pro rata à
    participação, e é antecipação do IRPFM: o ajuste em `viradaDeAno` devolve o que passar do imposto
    mínimo (zero para renda abaixo de R$ 600 mil).
+6. **Encargos sobre a folha.** `ENCARGOS_FOLHA` (29%) = provisões de 13º e férias + 1/3 + FGTS sobre salário e
+   provisões, em todos os regimes. A CPP fica fora dele: no Simples (Anexos I, II, III, V) está no DAS; no Presumido
+   e no Real é `CPP_FOLHA` (20% + RAT 2% + terceiros 5,8%, sobre salário e provisões) + 20% do pró-labore, e entra
+   no comparativo de regimes. A linha "Encargos" do DRE soma os dois — somar CPP no Simples seria cobrar em dobro.
+
+## Site da ESCSIN
+
+O jogo é linkado no site da ESCSIN. Por isso os honorários aparecem como "valor fictício" e há uma chamada para o
+escritório em **só três lugares**: tela final (abaixo da nota), fim do comparativo na aba Impostos e crédito no
+rodapé da abertura. Nada de pop-up nem chamada em outras telas. Endereços em `src/ui/externo.js`; no app, os links
+abrem fora da WebView pelo `@capacitor/app-launcher`.
 
 ## Mecânicas da v0.2 (o que não é óbvio)
 

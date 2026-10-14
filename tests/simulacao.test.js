@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   novoJogo, fecharMes, patrimonio, comparativoDoAno, trocarRegime, SEGMENTOS, REGIMES, DURACAO, capacidades,
   comprar, contratarEmprestimo, quitarEmprestimo, distribuirLucros, resolverEvento, EVENTOS, jogoEncerrado,
-  migrarEstado, VERSAO_ESTADO, dicas, valorEmpresa,
+  migrarEstado, VERSAO_ESTADO, dicas, valorEmpresa, ENCARGOS_FOLHA,
 } from '../src/engine/index.js';
 import { jogar, semente, ESTRATEGIAS } from './ajuda.js';
 
@@ -280,7 +280,7 @@ describe('estado salvo', () => {
     migrarEstado(s);
     expect(s.v).toBe(VERSAO_ESTADO);
     expect(s.dec.producaoAuto).toBe(true);
-    expect(s.hist[0].folhaFatorR).toBeCloseTo(s.hist[0].folha * 1.3 + s.hist[0].proLabore, 6);
+    expect(s.hist[0].folhaFatorR).toBeCloseTo(s.hist[0].folha * (1 + ENCARGOS_FOLHA) + s.hist[0].proLabore, 6);
     fecharMes(s, semente(7));
     expect(numerosFinitos(s)).toEqual([]);
   });
@@ -373,7 +373,7 @@ describe('regime tributario', () => {
   it('o Fator R conta 13o, ferias e FGTS da folha e o pro-labore', () => {
     jogar({
       segmento: 'software', meses: 6, seed: 2, aoFechar: (s, h) => {
-        expect(h.folhaFatorR).toBeCloseTo(h.folha * 1.3 + h.proLabore, 6);
+        expect(h.folhaFatorR).toBeCloseTo(h.folha * (1 + ENCARGOS_FOLHA) + h.proLabore, 6);
       },
     });
   });

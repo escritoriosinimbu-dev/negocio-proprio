@@ -1,5 +1,6 @@
 import {
   ANEXOS, HONORARIOS, FATOR_R_MINIMO, SUBLIMITE, PARTILHA_LOCAL, TETO_ISS_DAS, ENCARGOS_FOLHA, TETO_INSS,
+  CPP_FOLHA, INSS_PATRONAL,
 } from './regras.js';
 import { pct } from './formato.js';
 
@@ -118,7 +119,7 @@ export function apurar(regime, op, prejuizoAnt, saldoAnt = null) {
   if (regime === 'simples') {
     ({ anexo, aliq, tribVenda } = apurarSimples(seg, op, det, saldo));
   } else {
-    cpp = op.folha * 0.278 * 1.2 + op.proLabore * 0.20;
+    cpp = op.folha * CPP_FOLHA + op.proLabore * INSS_PATRONAL;
     tribVenda = apurarPisCofins(regime, seg, op, det, saldo) + tributosLocais(seg, op, det, saldo);
     det.push({ nome: 'INSS patronal + RAT + terceiros', valor: cpp });
   }

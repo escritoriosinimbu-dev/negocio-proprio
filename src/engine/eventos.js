@@ -641,7 +641,7 @@ export function eventoRegime(s) {
   return {
     id: 'regime',
     titulo: `Regime tributário do ano ${ano + 2}`,
-    texto: `É janeiro: o único mês para escolher o regime do ano. No ano ${ano + 1}, a mesma operação teria custado, em tributos mais o contador:`
+    texto: `É janeiro: o único mês para escolher o regime do ano. No ano ${ano + 1}, a mesma operação teria custado, em tributos mais o contador (honorários fictícios do jogo):`
       + `<div class="tab-wrap"><table>${linhas}</table></div>`
       + `<p class="small muted">Se o ano que vem for parecido, ${melhor ? `o ${NOME_REGIME[melhor]} sai mais barato` : 'compare os números'}. Crescimento muda a conta: no Simples a alíquota sobe com a receita; no Lucro Real, só se paga IRPJ e CSLL sobre lucro de verdade.${s.excluidoSimples ? ' O Simples está fechado: a receita do ano passou do limite.' : ''}</p>`,
     dados: { ordem, melhor: Math.max(0, ordem.indexOf(melhor)) },
