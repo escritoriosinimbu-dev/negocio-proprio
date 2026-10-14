@@ -5,7 +5,7 @@ export const SEGMENTOS = {
   hamburgueria: {
     nome: 'Hamburgueria', tipo: 'comercio', unidade: 'refeição', unidades: 'refeições',
     desc: 'Restaurante de bairro. Comida não vira estoque: o que a cozinha não serve no mês, não fatura.',
-    precoRef: 38, custoMat: 13, prodPorFunc: 700, mercado: 2600, elasticidade: 3, estocavel: false,
+    precoRef: 38, custoMat: 13, prodPorFunc: 700, mercado: 2450, elasticidade: 3, estocavel: false,
     aluguel: 5000, salProd: 2000, salCom: 1900, salAdm: 2700, capVenda: 900, capDono: 500,
     mkEscala: 4000, qEscala: 2500, setup: 70000, equipCusto: 30000, ganhoEquip: 0.2,
     icms: { aliq: 0.032, credito: false, nome: 'ICMS (regime de bares e restaurantes)' }, iss: 0,
@@ -13,7 +13,7 @@ export const SEGMENTOS = {
     funcInicial: { producao: 3, comercial: 1, adm: 0 },
     setorProd: 'Cozinha', cargoProd: 'cozinheiro', cargoCom: 'atendente', setorCom: 'Salão e atendimento',
     noSetorProd: 'na cozinha', noSetorCom: 'no salão', melhorProd: 'Seu melhor cozinheiro', pronomeProd: 'Ele',
-    umCargoCom: 'um atendente',
+    umCargoCom: 'um atendente', insumo: 'carne, pães e hortaliças',
     // Carne, pao, queijo e hortalicas tem aliquota zero de PIS/COFINS e bebidas revendidas sao
     // monofasicas: so ~30% das compras dao credito no regime nao cumulativo (Lei 10.833/2003,
     // art. 3o §2o II; Lei 10.925/2004, art. 1o; Lei 10.865/2004, art. 28).
@@ -21,12 +21,13 @@ export const SEGMENTOS = {
     expansoes: [
       { id: 'delivery', nome: 'Delivery próprio', desc: 'Motoboy e cardápio online. Mercado +30%.', custo: 18000, mult: 0.30, aluguel: 0 },
       { id: 'filial', nome: 'Segunda unidade', desc: 'Outro bairro. Mercado +80%, aluguel +R$ 6.000.', custo: 120000, mult: 0.80, aluguel: 6000 },
+      { id: 'shopping', nome: 'Unidade no shopping', desc: 'Praça de alimentação. Mercado +90%, aluguel +R$ 14.000.', custo: 220000, mult: 0.90, aluguel: 14000 },
     ],
   },
   confeccao: {
     nome: 'Confecção', tipo: 'industria', unidade: 'camiseta', unidades: 'camisetas',
     desc: 'Fábrica de camisetas. Pode produzir para estoque e vender depois — o Natal agradece.',
-    precoRef: 59, custoMat: 23, prodPorFunc: 380, mercado: 2600, elasticidade: 3, estocavel: true,
+    precoRef: 59, custoMat: 23, prodPorFunc: 380, mercado: 2350, elasticidade: 3, estocavel: true,
     aluguel: 4000, salProd: 2100, salCom: 2400, salAdm: 2700, capVenda: 600, capDono: 400,
     mkEscala: 3500, qEscala: 2500, setup: 55000, equipCusto: 35000, ganhoEquip: 0.2,
     icms: { aliq: 0.18, credito: true, nome: 'ICMS (débito − crédito)' }, iss: 0,
@@ -34,10 +35,11 @@ export const SEGMENTOS = {
     funcInicial: { producao: 3, comercial: 1, adm: 0 },
     setorProd: 'Fábrica', cargoProd: 'costureira', cargoCom: 'vendedor', setorCom: 'Vendas',
     noSetorProd: 'na fábrica', noSetorCom: 'nas vendas', melhorProd: 'Sua melhor costureira', pronomeProd: 'Ela',
-    umCargoCom: 'um vendedor',
+    umCargoCom: 'um vendedor', insumo: 'malha e aviamentos', planoNome: 'Plano de produção',
     expansoes: [
       { id: 'loja', nome: 'Loja virtual', desc: 'Venda direta pela internet. Mercado +35%.', custo: 20000, mult: 0.35, aluguel: 0 },
       { id: 'repres', nome: 'Representantes em outros estados', desc: 'Atacado para lojistas. Mercado +60%.', custo: 45000, mult: 0.60, aluguel: 0 },
+      { id: 'lojapropria', nome: 'Loja própria no centro', desc: 'Varejo com a sua marca. Mercado +50%, aluguel +R$ 7.000.', custo: 110000, mult: 0.50, aluguel: 7000 },
     ],
   },
   software: {
@@ -51,13 +53,61 @@ export const SEGMENTOS = {
     funcInicial: { producao: 1, comercial: 0, adm: 0 },
     setorProd: 'Desenvolvimento', cargoProd: 'programador', cargoCom: 'executivo de contas', setorCom: 'Comercial',
     noSetorProd: 'no desenvolvimento', noSetorCom: 'no comercial', melhorProd: 'Seu melhor programador', pronomeProd: 'Ele',
-    umCargoCom: 'um executivo de contas',
+    umCargoCom: 'um executivo de contas', insumo: 'licenças e servidores',
     // Receita de desenvolvimento de software fica no PIS/COFINS cumulativo mesmo no Lucro Real
     // (Lei 10.833/2003, art. 10, XXV, e art. 15, V).
     pisCofinsCumulativo: true,
     expansoes: [
       { id: 'parceria', nome: 'Parceria com integradoras', desc: 'Indicações de clientes maiores. Mercado +40%.', custo: 15000, mult: 0.40, aluguel: 0 },
       { id: 'saas', nome: 'Produto próprio (SaaS)', desc: 'Sistema vendido por assinatura. Mercado +70%.', custo: 80000, mult: 0.70, aluguel: 0 },
+      { id: 'sp', nome: 'Escritório em São Paulo', desc: 'Clientes grandes da capital. Mercado +80%, aluguel +R$ 12.000.', custo: 150000, mult: 0.80, aluguel: 12000 },
+    ],
+  },
+  contabilidade: {
+    nome: 'Escritório de contabilidade', tipo: 'servico', unidade: 'empresa-cliente', unidades: 'empresas-clientes',
+    desc: 'Atende empresas por honorário mensal. A carteira cresce devagar e também se perde devagar.',
+    precoRef: 900, custoMat: 45, prodPorFunc: 15, mercado: 135, elasticidade: 3, estocavel: false,
+    aluguel: 3000, salProd: 4200, salCom: 3500, salAdm: 2600, capVenda: 45, capDono: 30,
+    mkEscala: 2500, qEscala: 2500, setup: 30000, equipCusto: 15000, ganhoEquip: 0.10,
+    icms: null, iss: 0.03,
+    sazonal: [1, 1, 1.05, 1.05, 1, 1, 1, 1, 1, 1, 1, 0.95],
+    funcInicial: { producao: 2, comercial: 0, adm: 0 },
+    setorProd: 'Equipe contábil', cargoProd: 'analista contábil', cargoCom: 'executivo de relacionamento', setorCom: 'Comercial',
+    noSetorProd: 'na equipe contábil', noSetorCom: 'no comercial', melhorProd: 'Sua melhor analista', pronomeProd: 'Ela',
+    umCargoCom: 'um executivo de relacionamento', insumo: 'sistemas e certificados digitais',
+    // Servicos contabeis ficam no Anexo III qualquer que seja o Fator R (LC 123, art. 18 §5o-B, XIV).
+    anexoFixo: 'III',
+    // Carteira: cliente atendido fica; a procura do mes anda 30% do caminho ate a procura do mercado.
+    recorrente: 0.3, carteiraInicial: 8,
+    expansoes: [
+      { id: 'bpo', nome: 'BPO financeiro', desc: 'Contas a pagar e receber dos clientes. Mercado +30%.', custo: 20000, mult: 0.30, aluguel: 0 },
+      { id: 'digital', nome: 'Atendimento digital', desc: 'Clientes de outras cidades. Mercado +50%.', custo: 35000, mult: 0.50, aluguel: 0 },
+      { id: 'sede', nome: 'Segunda sede', desc: 'Outra cidade da região. Mercado +70%, aluguel +R$ 4.000.', custo: 90000, mult: 0.70, aluguel: 4000 },
+    ],
+  },
+  mercadinho: {
+    nome: 'Mercadinho de bairro', tipo: 'comercio', unidade: 'compra', unidades: 'compras',
+    desc: 'Revende mercadoria com margem curta e giro alto. Estoque parado estraga, e cada reajuste não repassado come o lucro. O ramo mais arriscado.',
+    precoRef: 85, custoMat: 56, prodPorFunc: 1100, mercado: 2450, elasticidade: 5, estocavel: true,
+    aluguel: 4000, salProd: 1900, salCom: 1850, salAdm: 2600, capVenda: 800, capDono: 450,
+    mkEscala: 3000, qEscala: 2500, setup: 50000, equipCusto: 25000, ganhoEquip: 0.15,
+    icms: { aliq: 0.12, credito: true, nome: 'ICMS (débito − crédito, cesta básica reduzida)' }, iss: 0,
+    sazonal: [0.95, 0.9, 0.95, 0.95, 1, 0.95, 1, 1, 0.95, 1, 1.05, 1.3],
+    funcInicial: { producao: 1, comercial: 1, adm: 0 },
+    setorProd: 'Estoque e reposição', cargoProd: 'repositor', cargoCom: 'operador de caixa', setorCom: 'Caixas e atendimento',
+    noSetorProd: 'na reposição', noSetorCom: 'nos caixas', melhorProd: 'Seu melhor repositor', pronomeProd: 'Ele',
+    umCargoCom: 'um operador de caixa', insumo: 'mercadorias', planoNome: 'Plano de compras',
+    // Revenda: o salario da reposicao e despesa do mes, nao custo da mercadoria.
+    revenda: true,
+    // Perda mensal do estoque (validade, avaria, furto).
+    perecivel: 0.03,
+    // Cesta basica com aliquota zero na venda (Lei 10.925/2004, art. 1o) e bebidas e higiene monofasicas
+    // (aliquota zero na revenda): so 40% da receita paga PIS/COFINS, e so as compras desses 40% dao credito.
+    fracaoTributadaPisCofins: 0.4,
+    expansoes: [
+      { id: 'app', nome: 'Delivery por aplicativo', desc: 'Pedidos pelo celular. Mercado +25%.', custo: 12000, mult: 0.25, aluguel: 0 },
+      { id: 'hortifruti', nome: 'Hortifrúti e padaria', desc: 'Seções novas que trazem cliente todo dia. Mercado +35%.', custo: 40000, mult: 0.35, aluguel: 0 },
+      { id: 'loja2', nome: 'Segunda loja', desc: 'Outro bairro. Mercado +80%, aluguel +R$ 6.000.', custo: 140000, mult: 0.80, aluguel: 6000 },
     ],
   },
 };
@@ -114,3 +164,18 @@ export const RENDA_MINIMA_IRPFM = 600000;
 // A nota mede o ganho do dono contra um capital fixo: o capital escolhido na abertura muda o
 // risco (folego de caixa), nao o tamanho da regua.
 export const CAPITAL_REFERENCIA = 150000;
+
+// Juros: a Selic anda ao longo do jogo (decisoes do Copom) e move o custo do dinheiro.
+export const SELIC_INICIAL = 0.14;
+export const SELIC_MIN = 0.065;
+export const SELIC_MAX = 0.20;
+// Capital de giro: Selic mensal + spread do banco, prefixado na contratacao.
+export const SPREAD_GIRO = 0.013;
+// Pronampe: Selic + 6% ao ano, pos-fixado (a parcela de juros muda com a Selic).
+export const SPREAD_PRONAMPE = 0.06;
+// Cheque especial: limitado a 8% ao mes (Res. CMN 4.765/2019).
+export const JUROS_CHEQUE = 0.08;
+// Reajuste anual de salarios (dissidio), aluguel e honorarios, aplicado em janeiro.
+export const REAJUSTE_ANUAL = 0.05;
+// Fatia maxima da procura que a concorrencia consegue tomar.
+export const CONCORRENCIA_MAX = 0.5;

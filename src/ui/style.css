@@ -166,3 +166,7 @@ tr.destaque td { background: var(--accent-soft); }
 .leg-lucro { background: var(--gold); }
 .carimbo.nota { font-size: 0.9rem; }
 .carimbo.nota b { font-size: 2rem; }
+
+/* texto dos acontecimentos (a decisao do regime traz uma tabela) */
+.texto-evento { display: flex; flex-direction: column; gap: 10px; }
+.texto-evento table { width: 100%; }

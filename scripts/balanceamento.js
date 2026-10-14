@@ -25,5 +25,5 @@ for (const segmento of Object.keys(SEGMENTOS)) {
   }
 }
 console.log(`${PARTIDAS} partidas de 36 meses por linha, capital de R$ 150 mil, acontecimentos com escolha aleatoria`);
-console.log('Referencia: parada ~1,4-2,0 (C/D), ativa ~2,8-3,5 (B), caotica 100% F. Nota: A >= 4x, B >= 2,5x, C >= 1,5x, D >= 1x.');
+console.log('Referencia: parada ~1,4-2,6 (C/D), ativa ~2,8-3,6 (B), caotica 100% F; mercadinho com mais variancia. Nota: A >= 4x, B >= 2,5x, C >= 1,5x, D >= 1x.');
 console.table(linhas);

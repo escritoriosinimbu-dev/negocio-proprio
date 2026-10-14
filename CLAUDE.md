@@ -8,7 +8,7 @@ Orientações para o Claude Code trabalhar neste repositório.
 npm test                 # vitest: testes do motor
 npm run build            # build web (Vite) em dist/
 npm run balanceamento    # 40 partidas automáticas por ramo/estratégia; rode após mexer em regras.js
-                         # referência: parada ~1,4–2,0 (C/D), ativa ~2,8–3,5 (B), caótica 100% falência
+                         # referência: parada ~1,4–2,6 (C/D), ativa ~2,8–3,6 (B), caótica 100% falência
 npm run android:sync     # build + cap sync android
 ```
 
@@ -58,6 +58,33 @@ LC 155/2016). Fatos que não são óbvios e que já custaram um erro:
 5. **Dividendos (Lei 15.270/2025).** A retenção de 10% incide sobre o total do mês da pessoa, pro rata à
    participação, e é antecipação do IRPFM: o ajuste em `viradaDeAno` devolve o que passar do imposto
    mínimo (zero para renda abaixo de R$ 600 mil).
+
+## Mecânicas da v0.2 (o que não é óbvio)
+
+1. **Preço justo.** `precoJusto` = preço de mercado × fator de qualidade × fator de reputação (os dois valem 1
+   em 50). A procura compara o preço com ele, com elasticidade 3; a reputação ainda decide quantos conhecem a
+   marca. Qualidade não multiplica mais a procura direto — isso contaria duas vezes.
+2. **Carteira** (`seg.recorrente`): a procura anda 30% do caminho até a do mercado por mês e `s.carteira` é quem
+   foi atendido. Preço alto perde clientes devagar.
+3. **Perdas sem caixa.** `s.perdasMes` (cliente que não paga) é baixado dos recebíveis *no fechamento*, nunca na
+   resolução do acontecimento: assim a variação do PL do mês continua igual ao lucro.
+4. **Contrato com fornecedor** trava `custoMat`; inflação e reajustes vão para `custoContratoAdiado` e chegam de
+   uma vez no fim. **Selic**: Pronampe (`posFixado`) muda de taxa todo mês; capital de giro fica com a do dia.
+5. **Reajuste anual** (`s.indice`, +5% todo janeiro) vale para salários, aluguel e honorários. Sem ele, preço
+   subindo com a inflação e custo fixo parado tornava o jogo fácil demais no ano 3.
+6. **Saldo credor.** ICMS e PIS/COFINS com crédito maior que o débito não zeram: o excedente vai para
+   `s.saldoCredor[regime]` (LC 87/1996, art. 24, III; Lei 10.833/2003, art. 3º §4º), simulado por regime como o
+   prejuízo. Na troca de regime, o saldo de ICMS segue a empresa e o de PIS/COFINS zera.
+7. **Revenda com alíquota zero.** No mercadinho, `fracaoTributadaPisCofins` (40%) reduz a base do débito *e* do
+   crédito; no Simples, sai do DAS a parcela de PIS/COFINS (15,5% do Anexo I) sobre os outros 60%. Reduzir só o
+   crédito cobrava PIS/COFINS sobre cesta básica.
+8. **Preço abusivo.** Acima de 110% do preço justo, a reputação cai (`abuso` em `fecharMes`); e o mercadinho tem
+   elasticidade 5. Sem isso, cobrar 20–30% acima do mercado sem gerir nada vencia as estratégias ativas.
+9. **Fornecedor barato** aparece uma vez por partida (`fornecedorNovoUsado`); trocar de fornecedor devolve o preço
+   de mercado e o fim do contrato desfaz o desconto (`contratoFornecedor.desconto`). Antes os descontos se empilhavam.
+10. **Balanceamento.** O robô "parada" reajusta o preço pelo mercado uma vez por ano e mantém o regime; o "ativo"
+   acompanha o mercado e escolhe o regime mais barato em janeiro. Escolher o regime ao acaso quebrava metade das
+   partidas. O mercadinho é o ramo arriscado de propósito (margem curta).
 
 ## Versão web
 
