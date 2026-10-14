@@ -149,8 +149,19 @@ export const PARTILHA_LOCAL = {
 };
 // ISS efetivo dentro do DAS limitado a 5% (o excedente vai para os tributos federais).
 export const TETO_ISS_DAS = 0.05;
-// FGTS + provisao de 13o e ferias, como fracao da folha: entra no DRE, no caixa e no Fator R.
-export const ENCARGOS_FOLHA = 0.30;
+// Encargos sobre a folha, em todos os regimes: provisoes de 13o (1/12) e de ferias + 1/3 (1/12 x 4/3)
+// e o FGTS de 8% sobre o salario e sobre essas provisoes. Da 29,0% dos salarios. Entram no DRE, no
+// caixa e no Fator R. A contribuicao patronal (CPP) NAO esta aqui: no Simples (Anexos I, II, III e V)
+// ela ja vem dentro do DAS; fora dele e CPP_FOLHA, somada a parte em tributos.js.
+export const FGTS = 0.08;
+export const PROVISOES_FOLHA = 1 / 12 + (1 / 12) * (4 / 3);
+export const ENCARGOS_FOLHA = PROVISOES_FOLHA + FGTS * (1 + PROVISOES_FOLHA);
+// Lucro Presumido e Real: INSS patronal 20% + RAT 2% + terceiros 5,8%, sobre o salario e as provisoes
+// de 13o e ferias (que tambem pagam INSS). Sobre o pro-labore, so os 20% patronais.
+export const INSS_PATRONAL = 0.20;
+export const RAT = 0.02;
+export const TERCEIROS = 0.058;
+export const CPP_FOLHA = (INSS_PATRONAL + RAT + TERCEIROS) * (1 + PROVISOES_FOLHA);
 export const FATOR_R_MINIMO = 0.28;
 export const DURACAO = 36;
 export const SALARIO_MINIMO = 1621; // Decreto 12.797/2025

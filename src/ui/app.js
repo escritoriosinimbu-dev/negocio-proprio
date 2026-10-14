@@ -13,6 +13,7 @@ import {
   fecharMes, comparativoDoAno, podeTrocarRegime, trocarRegime, resolverEvento, dicas,
 } from '../engine/index.js';
 import { salvarJogo, carregarJogo, apagarJogo } from './armazenamento.js';
+import { LINK_WHATSAPP, LINK_SITE, tratarLinkExterno, linkExterno } from './externo.js';
 
 // Interface: um unico render() reconstroi a tela a partir do estado `S`. Sliders atualizam
 // so os trechos afetados (para nao perder o arraste); o resto re-renderiza inteiro.
@@ -390,7 +391,7 @@ function abaPessoas() {
       <p class="ajuda">Moral alta aumenta a produtividade. Abaixo de 50, as pessoas começam a pedir demissão. ${S.mes > 0 ? 'Salário de quem já está na empresa não pode ser reduzido (CF, art. 7º, VI): a política só sobe. Para cortar folha, só demitindo, e isso custa 1,3 salário.' : 'Depois do primeiro mês, a política só pode subir: salário não se reduz.'}</p>
     </div>
     <div class="bloco"><h3>Encargos sobre a folha</h3>
-      <p class="ajuda">FGTS e provisões de 13º e férias somam cerca de 30% em qualquer regime. Fora do Simples entram ainda INSS patronal, RAT e terceiros (≈ 33%) e 20% sobre o pró-labore. No Simples, essa contribuição já está dentro do DAS.</p>
+      <p class="ajuda">Em qualquer regime: FGTS (8%) e provisões de 13º e de férias + 1/3, com FGTS sobre elas, somam 29% dos salários. Fora do Simples entram ainda INSS patronal (20%), RAT (2%) e terceiros (5,8%) sobre salários e provisões (≈ 33%), e 20% sobre o pró-labore. No Simples (Anexos I a III e V), a contribuição patronal já está dentro do DAS.</p>
     </div>
   </div>`;
 }
@@ -476,7 +477,7 @@ function abaImpostos() {
       <div class="opcoes">${REGIMES.map(r => {
         const bloqueado = !janeiro || (r === 'simples' && S.excluidoSimples);
         return `<label class="opcao"><input type="radio" name="regime" value="${r}" ${S.regime === r ? 'checked' : ''} ${bloqueado ? 'disabled' : ''}>
-          <b>${NOME_REGIME[r]}</b><span>${descr[r]} Contador: ${brl(HONORARIOS[r] * indice(S))}/mês.</span></label>`;
+          <b>${NOME_REGIME[r]}</b><span>${descr[r]} Contador (valor fictício): ${brl(HONORARIOS[r] * indice(S))}/mês.</span></label>`;
       }).join('')}</div>
       ${S.excluidoSimples ? '<p class="small war">A receita do ano passou do limite de R$ 4,8 milhões: o Simples fica fechado até um janeiro depois de um ano dentro do limite.</p>' : ''}
     </div>
@@ -498,6 +499,7 @@ function abaImpostos() {
           <td>${tot[r] === null ? 'não se aplica' : brl(tot[r])}</td><td>${tot[r] === null || tot[S.regime] === null || r === S.regime ? '—' : `<span class="${tot[r] < tot[S.regime] ? 'pos' : 'neg'}">${brl(tot[r] - tot[S.regime])}</span>`}</td></tr>`).join('')}
       </table></div>
       <p class="ajuda">Inclui a contribuição patronal sobre a folha, que muda de um regime para outro. Não inclui a diferença de honorários do contador. Todo janeiro o jogo abre a decisão do regime com este comparativo, já somando os honorários.</p>
+      <p class="small">No mundo real, a escolha do regime depende dos seus números. ${linkExterno(LINK_WHATSAPP, 'Fale com a ESCSIN.')}</p>
     </div>` : '<div class="bloco"><p class="ajuda">Feche o primeiro mês para ver os tributos apurados e o comparativo entre regimes.</p></div>'}
     <div class="bloco"><h3>Regras do jogo</h3><p class="ajuda">Alíquotas do Simples pelas tabelas da LC 123/2006 (Anexos I, II, III e V). Se a receita do ano passar do sublimite de R$ 3,6 milhões, ICMS e ISS saem do DAS e passam a ser pagos por fora: no ano seguinte, ou já no mês seguinte se passar de R$ 4,32 milhões. Na 6ª faixa (RBT12 acima de R$ 3,6 mi), enquanto a empresa não está impedida, ICMS e ISS seguem no DAS calculados pela 5ª faixa. Acima do limite de R$ 4,8 milhões no ano a empresa sai do Simples em janeiro, ou no mês seguinte se passar de R$ 5,76 milhões. PIS/COFINS da indústria sem o ICMS na base (Tema 69 do STF). ICMS, ISS e IRPJ/CSLL simplificados: apuração mensal, sem substituição tributária e sem IPI. Crédito de ICMS ou de PIS/COFINS maior que o débito vira saldo credor para os meses seguintes. No mercadinho, cesta básica e produtos monofásicos têm alíquota zero de PIS/COFINS na venda: só 40% da receita paga as contribuições (no Simples, sai do DAS a parcela delas sobre os outros 60%). A transição para IBS e CBS da reforma tributária ainda não está no jogo.</p></div>
   </div>`;
@@ -525,12 +527,12 @@ function abaRelatorios() {
         ${linha(SEG(S).estocavel && !SEG(S).revenda ? '(−) Custo dos produtos vendidos' : SEG(S).tipo === 'servico' ? '(−) Custo direto dos serviços' : '(−) Custo das mercadorias vendidas', x => x.cmv)}
         ${linha('= Lucro bruto', x => x.receita - x.tribVenda - x.cmv, 'total', false)}
         ${linha('(−) Salários', x => x.folha)}
-        ${linha('(−) Encargos sobre a folha', x => x.encargos)}
+        ${linha('(−) Encargos sobre a folha*', x => x.encargos)}
         ${linha('(−) Pró-labore', x => x.proLabore)}
         ${linha('(−) Aluguel', x => x.aluguel)}
         ${linha('(−) Marketing', x => x.marketing)}
         ${linha('(−) Qualidade', x => x.qualidade)}
-        ${linha('(−) Contabilidade', x => x.contador)}
+        ${linha('(−) Contador (valor fictício)', x => x.contador)}
         ${linha('(−) Seguro', x => x.seguro || 0)}
         ${linha('(−) Perdas com clientes', x => x.perdas || 0)}
         ${linha('(−) Outras despesas', x => x.despesas - x.aluguel - x.marketing - x.qualidade - x.contador - (x.seguro || 0) - (x.perdas || 0))}
@@ -540,6 +542,9 @@ function abaRelatorios() {
         ${linha('(−) IRPJ e CSLL', x => x.irpj)}
         ${linha('= Lucro líquido', x => x.lucro, 'total', false)}
       </table></div>
+      <p class="ajuda">* ${h.regime === 'simples'
+        ? 'No Simples: FGTS (8%) e provisões de 13º e de férias + 1/3, com FGTS sobre elas, 29% dos salários. A contribuição patronal (INSS) está dentro do DAS.'
+        : `No ${NOME_REGIME[h.regime]}: FGTS (8%) e provisões de 13º e de férias + 1/3, com FGTS sobre elas (29% dos salários), mais INSS patronal (20%), RAT (2%) e terceiros (5,8%) sobre salários e provisões, e 20% de INSS sobre o pró-labore.`}</p>
     </div>
     <div class="bloco"><h3>Fluxo de caixa de ${am.mes.toLowerCase()}</h3>
       <div class="tab-wrap"><table>
@@ -589,11 +594,13 @@ function telaAbertura() {
       ${[[0, 'Sem dívida'], [50000, 'Selic + 6% ao ano (pós-fixado), 36 parcelas'], [100000, 'Selic + 6% ao ano (pós-fixado), 36 parcelas']].map(([v, r]) => `<label class="opcao"><input type="radio" name="emprestimo" value="${v}" ${setup.emprestimo === v ? 'checked' : ''}><b>${v ? brl(v) : 'Nenhum'}</b><span>${r}</span></label>`).join('')}
     </div></div>
     <div class="bloco"><h3>Regime tributário do primeiro ano</h3><div class="opcoes">
-      ${REGIMES.map(r => `<label class="opcao"><input type="radio" name="regime" value="${r}" ${setup.regime === r ? 'checked' : ''}><b>${NOME_REGIME[r]}</b><span>Contador: ${brl(HONORARIOS[r])}/mês</span></label>`).join('')}
-    </div><p class="ajuda">Dá para trocar todo mês de janeiro. A aba Impostos mostra quanto você pagaria em cada regime.</p></div>
+      ${REGIMES.map(r => `<label class="opcao"><input type="radio" name="regime" value="${r}" ${setup.regime === r ? 'checked' : ''}><b>${NOME_REGIME[r]}</b><span>Contador (valor fictício): ${brl(HONORARIOS[r])}/mês</span></label>`).join('')}
+    </div><p class="ajuda">Dá para trocar todo mês de janeiro. A aba Impostos mostra quanto você pagaria em cada regime.</p>
+      <p class="small muted">Honorários, alíquotas e custos do jogo são simplificados e servem só para a simulação.</p></div>
     <div class="bloco"><div class="row between"><div><span class="rot">Caixa inicial</span><div class="grande ${inicial < 0 ? 'neg' : ''}">${brl(inicial)}</div></div>
       <button class="fechar" data-acao="iniciar" ${folego < 1 ? 'disabled' : ''}>Abrir a empresa →</button></div>
       <p class="small ${folego < 1 ? 'neg' : 'muted'}">Custos fixos do primeiro mês: cerca de ${brl(fixo)}. ${folego < 1 ? 'O caixa não paga nem um mês: escolha mais capital ou um empréstimo.' : `O caixa cobre ${folego.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mês(es) sem vender nada.`}</p></div>
+    <p class="credito small muted">Um jogo da ${linkExterno(LINK_SITE, 'ESCSIN Contabilidade')}</p>
   </div>`;
 }
 
@@ -647,6 +654,8 @@ function conteudoModal() {
       <p>${quebrou ? `O caixa ficou negativo além do que o banco aceitava. A empresa durou ${S.mes} meses.` : `Você colocou ${brl(S.capitalInicial)} no negócio e saiu com ${brl(rq)}, somando pró-labore líquido, lucros recebidos e a sua parte no valor da empresa: ganho de ${brl(rq - S.capitalInicial)}.`}</p>
       <div class="row"><span class="carimbo nota">Nota<b>${notaFinal(S)}</b></span>
         <div class="small muted">${quebrou ? '' : `${fmtMultiplo(mult)} (1 + ganho ÷ ${brl(CAPITAL_REFERENCIA)}; ${REGUA})`}</div></div>
+      <div class="cta-escsin"><p>Quer fazer essa conta com a sua empresa de verdade? A ESCSIN Contabilidade faz a simulação de regime e de custos com os seus números.</p>
+        ${linkExterno(LINK_WHATSAPP, 'Falar com a ESCSIN no WhatsApp', 'btn')}</div>
       <div class="kpis">${kpi('Receita total', brlK(soma(S.hist, x => x.receita)))}${kpi('Lucro acumulado', brlK(S.lucroAcum), sinal(S.lucroAcum))}${kpi('Tributos pagos', brlK(tributos))}${kpi('Empregos', S.func.producao + S.func.comercial + S.func.adm)}</div>
       <div class="stack apertada">
         ${quebrou ? '' : '<button class="btn prim" data-acao="continuar">Continuar jogando</button>'}
@@ -736,6 +745,7 @@ function aoMudar(ev) {
 }
 
 function aoClicar(ev) {
+  if (tratarLinkExterno(ev)) return;
   const b = ev.target.closest('button');
   if (!b || b.disabled) return;
   // com um modal aberto, so os botoes dele valem (o teclado alcanca a tela de tras)

@@ -1,6 +1,7 @@
 import {
   SEGMENTOS, POLITICA, SETORES, CAPITAL_REFERENCIA, ENCARGOS_FOLHA, SALARIO_MINIMO, LIMITE_SIMPLES, TOLERANCIA_EXCESSO,
   LIMITE_ISENCAO_DIVIDENDOS, ALIQ_RETENCAO_DIVIDENDOS, HONORARIOS, SELIC_INICIAL, SPREAD_GIRO, SPREAD_PRONAMPE,
+  CPP_FOLHA, INSS_PATRONAL,
 } from './regras.js';
 import { liquidoProLabore, apurar } from './tributos.js';
 
@@ -183,7 +184,7 @@ export function premioSeguro(s) {
 export function custosFixos(s) {
   const d = s.dec, folha = folhaPrevista(s);
   // fora do Simples, a contribuicao patronal (INSS, RAT e terceiros) sai por fora do DAS
-  const cpp = s.regime === 'simples' ? 0 : folha * 0.278 * 1.2 + d.proLabore * 0.2;
+  const cpp = s.regime === 'simples' ? 0 : folha * CPP_FOLHA + d.proLabore * INSS_PATRONAL;
   return folha * (1 + ENCARGOS_FOLHA) + cpp + d.proLabore + aluguelMes(s)
     + d.marketing + d.qualidade + (HONORARIOS[s.regime] + 600) * indice(s) + (d.seguro ? premioSeguro(s) : 0)
     + soma(s.emprestimos, e => e.saldo * e.taxa) + s.imobilizado / 120;

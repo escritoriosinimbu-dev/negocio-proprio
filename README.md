@@ -86,7 +86,7 @@ scripts/        balanceamento
 ## Simplificações
 
 É um jogo, não um sistema fiscal. IRPJ e CSLL são apurados mês a mês, não há substituição tributária nem
-IPI, o ICMS usa uma alíquota única por ramo e os encargos de FGTS, 13º e férias entram como 30% da folha. A
+IPI, o ICMS usa uma alíquota única por ramo e os encargos de FGTS e das provisões de 13º e férias + 1/3 entram como 29% da folha (mais INSS patronal, RAT de 2% e terceiros fora do Simples). Os honorários do contador são fictícios. A
 transição para IBS e CBS da reforma tributária ainda não está no jogo.
 
 O que o jogo trata como na lei, porque é justamente o que um escritório explica para o cliente:
