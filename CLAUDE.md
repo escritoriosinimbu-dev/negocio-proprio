@@ -75,7 +75,7 @@ laranja `#F5A21B`, fundo `#f7f8fc`; tema escuro com fundo `#0f0f2e`), Sora nos t
 no texto, servidas pelos pacotes `@fontsource` (nada de Google Fonts: o jogo roda offline e no APK). Laranja como
 **texto** sobre branco só em `#9c6200` (o `#F5A21B` não passa no contraste AA); verde e vermelho continuam só para
 lucro/prejuízo e alertas. O logo (`public/marca/logo-escsin.jpg`, fundo branco) fica no topo da abertura sobre um selo
-branco, com link para o site. Ícones e splash do app continuam os antigos (`#1C6A4B`), de propósito.
+branco, com link para o site. Ícone e splash usam o mesmo símbolo de antes (barras e seta) nas cores da marca.
 
 ## Mecânicas da v0.2 (o que não é óbvio)
 
@@ -123,6 +123,6 @@ Pages (só repositório público) e/ou no Cloudflare Pages (se os segredos exist
   Esse piso não vale para a Huawei WebView (`com.huawei.webview`, numeração própria): quem cobre esse caso
   é a checagem de recursos no `<head>` do `index.html`, que redireciona para a mesma página.
 - Ícone e splash saem de `assets/` com `npx @capacitor/assets generate --android` (cores no README do
-  commit que os gerou: fundo `#1C6A4B`/`#0D1511`, splash `#EAF0EA`/`#0D1511`).
+  commit que os gerou: ícone com fundo `#1a1966`, barras brancas e seta `#F5A21B`; splash `#f7f8fc`/`#0f0f2e`).
 - As áreas seguras chegam pelo SystemBars do Capacitor como `--safe-area-inset-*` e são lidas no CSS
   com fallback para `env()`.
